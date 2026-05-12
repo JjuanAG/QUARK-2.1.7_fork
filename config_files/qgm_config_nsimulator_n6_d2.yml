@@ -1,0 +1,41 @@
+application:
+  config:
+    n_qubits:
+    - 6
+  name: GenerativeModeling
+  submodules:
+  - config:
+      train_size:
+      - 0.3
+    name: Discrete Data
+    submodules:
+    - config:
+        depth:
+        - 2
+      name: CircuitCardinality
+      submodules:
+      - config:
+          backend:
+          - fake_sherbrooke_simulator
+          n_shots:
+          - 100
+        name: LibraryQiskit
+        submodules:
+        - config:
+            batch_size:
+            - 20
+            device:
+            - cpu
+            epochs:
+            - 2
+            learning_rate_discriminator:
+            - 0.1
+            learning_rate_generator:
+            - 0.1
+            loss:
+            - KL
+            pretrained:
+            - true
+          name: QGAN
+          submodules: []
+repetitions: 1

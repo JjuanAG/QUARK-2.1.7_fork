@@ -91,7 +91,7 @@ def get_probability_distribution(file_path):
 
     return probability_distribution
 
-
+# Note: The following function only works for the case that the user selects the discrete dataset 
 def get_config_parameters(file_path):
     if not os.path.exists(file_path):
         print(f"Error: File not found at {os.path.abspath(file_path)}")
@@ -240,53 +240,69 @@ def get_runtimes(file_path):
 
 
 ############
-
-def get_paths_to_data(config_path_name, noisy=False):
-    # 1. Setup the base path
-    if noisy:        
-        base_path = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted\noisy")
-    else:   
-        base_path = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted\not_noisy")
-    
-    # 2. Construct the full path to the specific config folder
-    target_dir = base_path / config_path_name
+def process_benchmark_data(simulator_path_name):
+    # 1. Setup the target path       
+    base_path = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
+    target_dir = base_path / simulator_path_name
     
     if not target_dir.exists():
         print(f"Directory not found: {target_dir}")
-        return []
+        return [], {}
 
-    all_run_data = []
+    all_run_results = []
+    global_constant_config = None
+    consistency_error = False
 
-    # 3. Iterate through all folders starting with 'generativemodeling'
+    # 2. Iterate through all folders starting with 'generativemodeling'
     for gen_folder in target_dir.glob("generativemodeling-*"):
         
-        # We search recursively (rglob) within this specific run folder
-        # to find the deeply nested files.
-        run_files = {
-            "run_folder": str(gen_folder),
-            "config_yml": next(gen_folder.glob("config.yml"), None),
-            "results_json": next(gen_folder.glob("results.json"), None),
-            # Using * to handle the potential underscore in 'metrics_1'
-            "metrics_pkl": next(gen_folder.rglob("record_gen_metrics*.pkl"), None),
-            "histogram_npy": next(gen_folder.rglob("histogram_generated.npy"), None)
+        # Locate required files
+        config_file = next(gen_folder.glob("config.yml"), None)
+        metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
+        histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
+
+        if not all([config_file, metrics_file, histogram_file]):
+            print(f"Skipping {gen_folder.name}: Missing one or more required files.")
+            continue
+
+        # --- DATA EXTRACTION ---
+        config_data = get_config_parameters(str(config_file))
+        precision_val = get_precission(str(metrics_file))
+        pmf_data = get_probability_distribution(str(histogram_file))
+
+        if config_data is None:
+            continue
+
+        # --- CONFIG CONSISTENCY CHECK ---
+        # Extract constants (everything EXCEPT n_qubits and depth)
+        current_constants = {k: v for k, v in config_data.items() if k not in ['n_qubits', 'depth']}
+        
+        if global_constant_config is None:
+            # First folder sets the baseline for constants
+            global_constant_config = current_constants
+        else:
+            # Compare current constants to the baseline
+            if current_constants != global_constant_config:
+                print(f"Warning: Configuration mismatch in folder {gen_folder.name}")
+                consistency_error = True
+
+        # --- RESTRUCTURE RUN DATA ---
+        run_entry = {
+            'n_qubits': config_data.get('n_qubits'),
+            'circuit_depth': config_data.get('depth'),
+            'precission': precision_val,
+            'pmf': pmf_data
         }
-        
-        # Convert Path objects to strings for easier use later
-        for key in run_files:
-            if run_files[key] and key != "run_folder":
-                run_files[key] = str(run_files[key])
-        
-        all_run_data.append(run_files)
-        
-    return all_run_data
+        all_run_results.append(run_entry)
 
+    if consistency_error:
+        print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
 
+    print(all_run_results)
+    print()
+    print("Global Constant Config:", global_constant_config)
+    return all_run_results, global_constant_config
 
-# Example Usage:
-# results = get_paths_to_data("your_config_folder_name")
-# for run in results:
-#     print(f"Found files for: {run['run_folder']}")
-#     print(f" - Metrics: {run['metrics_pkl']}")
-
-
+# --- Example Usage ---
+process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu")
 
