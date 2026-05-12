@@ -240,9 +240,11 @@ def get_runtimes(file_path):
 
 
 ############
-def process_benchmark_data(simulator_path_name):
+base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
+base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
+
+def process_benchmark_data(simulator_path_name, base_path):
     # 1. Setup the target path       
-    base_path = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
     target_dir = base_path / simulator_path_name
     
     if not target_dir.exists():
@@ -304,5 +306,5 @@ def process_benchmark_data(simulator_path_name):
     return all_run_results, global_constant_config
 
 # --- Example Usage ---
-process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu")
-
+process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu", base_path_itwm)
+# process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu", base_path_pc)
