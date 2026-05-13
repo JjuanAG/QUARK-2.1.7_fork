@@ -243,7 +243,7 @@ def get_runtimes(file_path):
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
 
-def process_benchmark_data(simulator_path_name, base_path):
+def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: Extend functionality so that it can also extract the runtimes
     # 1. Setup the target path       
     target_dir = base_path / simulator_path_name
     
@@ -300,11 +300,49 @@ def process_benchmark_data(simulator_path_name, base_path):
     if consistency_error:
         print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
 
-    print(all_run_results)
+    print(f"Number of runs processed: {len(all_run_results)}")
+
+    # Printing results for verification
+    for idx, run in enumerate(all_run_results):
+        print(f"Benchmark run {idx+1}: {all_run_results[idx]}")
     print()
     print("Global Constant Config:", global_constant_config)
     return all_run_results, global_constant_config
 
 # --- Example Usage ---
-process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu", base_path_itwm)
-# process_benchmark_data(r"constant_config_1\aer_statevector_simulator_gpu", base_path_pc)
+extract_run_data_for_config_group(r"constant_config_1\aer_statevector_simulator_gpu", base_path_itwm)
+# extract_benchmark_run_data_for_config_group(r"constant_config_1\aer_statevector_simulator_gpu", base_path_pc)
+# --- ---
+
+def check_for_compatible_config_groups_across_simulators(notnoisy_simulator_path, noisy_simulator_path, base_path):
+    notnoisy_data_list, notnoisy_constants = extract_run_data_for_config_group(notnoisy_simulator_path, base_path)
+    noisy_data_list, noisy_constants = extract_run_data_for_config_group(noisy_simulator_path, base_path)
+
+    if notnoisy_constants != noisy_constants:
+        print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
+        print("Not-noisy constants:", notnoisy_constants)
+        print("Noisy constants:", noisy_constants)
+        return False
+    for idx, (notnoisy_run, noisy_run) in enumerate(zip(notnoisy_data_list, noisy_data_list)):
+        if notnoisy_run['n_qubits'] != noisy_run['n_qubits'] or notnoisy_run['circuit_depth'] != noisy_run['circuit_depth']:
+            print(f"Error: Run {idx+1} has mismatching n_qubits or circuit_depth between not-noisy and noisy simulators.")
+            print(f"Not-noisy run: n_qubits={notnoisy_run['n_qubits']}, circuit_depth={notnoisy_run['circuit_depth']}")
+            print(f"Noisy run: n_qubits={noisy_run['n_qubits']}, circuit_depth={noisy_run['circuit_depth']}")
+            return False
+
+    print("Success: The constant configuration parameters match between the not-noisy and noisy simulators.")
+    return True
+
+
+
+#TODO: Extend the functionality so that it processes probability distributions and run times as well
+#TODO: Not runs with noisy simulators have been done yet
+def noisy_notnoisy_precision_comparison(notnoisy_simulator_path, noisy_simulator_path = None):  
+    # Extract data
+    notnoisy_data_list = extract_run_data_for_config_group(notnoisy_simulator_path, base_path_itwm)
+    noisy_data_list = extract_run_data_for_config_group(noisy_simulator_path, base_path_itwm) if noisy_simulator_path else None
+    if len(notnoisy_data_list) != len(noisy_data_list):
+        print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
+        return
+
+    # volumetric benchmarking for not-noisy and noisy simulators
