@@ -4,8 +4,17 @@ import pickle
 import numpy as np
 import yaml
 from pathlib import Path
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 
+class VolBenchGQMDataExtractor:
+    """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
+    def __init__(self, base_path):
+        self.base_path = Path(base_path)
+
+    def get_precision(self, file_path):
+        return get_precision(file_path)
 
 def fetch_data(file_path):
     """
@@ -45,7 +54,7 @@ def fetch_data(file_path):
     return data
 
 
-def get_precission(file_path):
+def get_precision(file_path):
     if not os.path.exists(file_path):
         print(f"Error: File not found at {os.path.abspath(file_path)}")
         return None
@@ -64,9 +73,9 @@ def get_precission(file_path):
         print(f"Failed to load: {e}")
         return None
     
-    precission = data.get('precision', None) if isinstance(data, dict) else None
+    precision = data.get('precision', None) if isinstance(data, dict) else None
 
-    return precission
+    return precision
 
 
 def get_probability_distribution(file_path):
@@ -245,6 +254,7 @@ base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_ru
 
 # TODO: Extend functionality so that it can also extract the runtimes
 # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
+# TODO: Note that the algorith is hard coded to go into the subfolders names "generativemodeling..." If the user changes the name of these folders, the function will not work.
 def extract_run_data_for_config_group(simulator_path_name, base_path):
     # 1. Setup the target path       
     target_dir = base_path / simulator_path_name
@@ -275,7 +285,7 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):
 
         # --- DATA EXTRACTION ---
         config_data = get_config_parameters(str(config_file))
-        precision_val = get_precission(str(metrics_file))
+        precision_val = get_precision(str(metrics_file))
         pmf_data = get_probability_distribution(str(histogram_file))
 
         if config_data is None:
@@ -309,7 +319,7 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):
         run_entry = {
             'n_qubits': current_qubits,
             'circuit_depth': current_depth,
-            'precission': precision_val,
+            'precision': precision_val,
             'pmf': pmf_data
         }
         all_run_results.append(run_entry)
@@ -342,7 +352,11 @@ def check_for_compatible_config_groups_across_simulators(notnoisy_simulator_path
     n_qubits_list_noisy = [noisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(noisy_data_list)]
     circuit_depth_list_noisy = [noisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(noisy_data_list)]
 
-    if notnoisy_constants != noisy_constants:
+    if len(notnoisy_data_list) != len(noisy_data_list):
+        print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
+        return
+
+    elif notnoisy_constants != noisy_constants:
         print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
         print("Not-noisy constants:", notnoisy_constants)
         print("Noisy constants:", noisy_constants)
@@ -363,17 +377,52 @@ def check_for_compatible_config_groups_across_simulators(notnoisy_simulator_path
     return True
 
 
-
-
-
 #TODO: Extend the functionality so that it processes probability distributions and run times as well
 #TODO: Not runs with noisy simulators have been done yet
-def noisy_notnoisy_precision_comparison(notnoisy_simulator_path, noisy_simulator_path = None):  
-    # Extract data
-    notnoisy_data_list = extract_run_data_for_config_group(notnoisy_simulator_path, base_path_itwm)
-    noisy_data_list = extract_run_data_for_config_group(noisy_simulator_path, base_path_itwm) if noisy_simulator_path else None
-    if len(notnoisy_data_list) != len(noisy_data_list):
-        print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
-        return
+def noisy_notnoisy_precision_comparison(notnoisy_simulator_path, noisy_simulator_path, base_path): 
+    # Run compatibility check
+    check_for_compatible_config_groups_across_simulators(notnoisy_simulator_path, noisy_simulator_path, base_path)
+    
+    # Extract data (Unpacking the tuple: data_list, constant_config)
+    notnoisy_data_list, _ = extract_run_data_for_config_group(notnoisy_simulator_path, base_path)
+    noisy_data_list, _ = extract_run_data_for_config_group(noisy_simulator_path, base_path)
 
-    # volumetric benchmarking for not-noisy and noisy simulators
+    # Helper function to extract and sort axes data
+    def prepare_plot_vectors(data_list):
+        # Sorting ensures the "curve" connects points in a logical order
+        sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
+        x = [d['n_qubits'] for d in sorted_data]
+        y = [d['circuit_depth'] for d in sorted_data]
+        # Accessing 'precision' as defined in your extraction function
+        z = [d['precision'] for d in sorted_data]
+        return x, y, z
+
+    # Prepare vectors for both simulators
+    x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)
+    x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)
+
+    # Initialize 3D Plot
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Plot curves
+    # Points/markers are included to visualize individual benchmark runs
+    ax.plot(x_free, y_free, z_free, label="noise-free simulator", marker='o', linewidth=2)
+    ax.plot(x_noisy, y_noisy, z_noisy, label="noisy simulator", marker='x', linestyle='--', linewidth=2)
+
+    # Labels and Formatting
+    ax.set_xlabel('n_qubits (X)')
+    ax.set_ylabel('circuit_depth (Y)')
+    ax.set_zlabel('Precision (Z)')
+    ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
+    ax.legend()
+
+    plt.show()
+
+def noisy_notnoisy_pmf_comparison(notnoisy_simulator_path, noisy_simulator_path, base_path):
+    # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the probability mass functions (PMFs) for each run.
+    pass
+
+def noisy_notnoisy_runtime_comparison(notnoisy_simulator_path, noisy_simulator_path, base_path):
+    # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the runtime for each run.
+    pass
