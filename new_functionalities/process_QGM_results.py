@@ -102,12 +102,12 @@ print("Gen histogram:", np.load(base_path_itwm + "\\histogram_generated.npy").sh
 print("Train histogram:", np.load(base_path_itwm + "\\histogram_train.npy").shape)
 print("Best params:", np.load(base_path_itwm + "\\best_parameters_1.npy", allow_pickle=True))
 
-def raw_dump_quark_file(file_path):
+def raw_dump_quark_file(base_path, file_name):
     """
     Load and print RAW CONTENTS of QUARK files WITHOUT calculations.
     Just the exact data as stored.
     """
-    file_path = Path(file_path)
+    file_path = Path(base_path) / file_name
     print(f"\n{'#'*80}")
     print(f"RAW CONTENTS: {file_path.name}")
     print(f"Path: {file_path.absolute()}")
@@ -147,13 +147,13 @@ def raw_dump_quark_file(file_path):
 
 # LOAD ALL YOUR FILES - RAW VALUES ONLY
 files = [
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\best_parameters_1.npy",
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\data_1.pkl",
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\histogram_generated.npy",
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\histogram_train.npy",
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\record_gen_metrics_1.pkl",
-    r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1\training_results-1.pkl"
+    r"best_parameters_1.npy",
+    r"data_1.pkl",
+    r"histogram_generated.npy",
+    r"histogram_train.npy",
+    r"record_gen_metrics_1.pkl",
+    r"training_results-1.pkl"
 ]
 
 for f in files:
-    raw_dump_quark_file(f)
+    raw_dump_quark_file(base_path_itwm, f)
