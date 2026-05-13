@@ -243,7 +243,9 @@ def get_runtimes(file_path):
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
 
-def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: Extend functionality so that it can also extract the runtimes
+# TODO: Extend functionality so that it can also extract the runtimes
+# TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
+def extract_run_data_for_config_group(simulator_path_name, base_path):
     # 1. Setup the target path       
     target_dir = base_path / simulator_path_name
     
@@ -254,12 +256,16 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: 
     all_run_results = []
     global_constant_config = None
     consistency_error = False
+    
+    # Track (n_qubits, depth) to detect duplicates
+    seen_combinations = set()
 
     # 2. Iterate through all folders starting with 'generativemodeling'
     for gen_folder in target_dir.glob("generativemodeling-*"):
         
-        # Locate required files
+        # Locate required files based on image_e02a1d.png structure
         config_file = next(gen_folder.glob("config.yml"), None)
+        # Using rglob for nested files in benchmark_0/rep_1 subfolders
         metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
         histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
 
@@ -274,6 +280,17 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: 
 
         if config_data is None:
             continue
+
+        # --- DUPLICATE RUN CHECK ---
+        current_qubits = config_data.get('n_qubits')
+        current_depth = config_data.get('depth')
+        combination = (current_qubits, current_depth)
+
+        if combination in seen_combinations:
+            print(f"WARNING: Two runs found with the exact same number of qubits ({current_qubits}) "
+                  f"and circuit depth ({current_depth}) in folder: {gen_folder.name}")
+        else:
+            seen_combinations.add(combination)
 
         # --- CONFIG CONSISTENCY CHECK ---
         # Extract constants (everything EXCEPT n_qubits and depth)
@@ -290,8 +307,8 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: 
 
         # --- RESTRUCTURE RUN DATA ---
         run_entry = {
-            'n_qubits': config_data.get('n_qubits'),
-            'circuit_depth': config_data.get('depth'),
+            'n_qubits': current_qubits,
+            'circuit_depth': current_depth,
             'precission': precision_val,
             'pmf': pmf_data
         }
@@ -305,8 +322,10 @@ def extract_run_data_for_config_group(simulator_path_name, base_path):  # TODO: 
     # Printing results for verification
     for idx, run in enumerate(all_run_results):
         print(f"Benchmark run {idx+1}: {all_run_results[idx]}")
+        
     print()
     print("Global Constant Config:", global_constant_config)
+    
     return all_run_results, global_constant_config
 
 # --- Example Usage ---
@@ -317,21 +336,33 @@ extract_run_data_for_config_group(r"constant_config_1\aer_statevector_simulator_
 def check_for_compatible_config_groups_across_simulators(notnoisy_simulator_path, noisy_simulator_path, base_path):
     notnoisy_data_list, notnoisy_constants = extract_run_data_for_config_group(notnoisy_simulator_path, base_path)
     noisy_data_list, noisy_constants = extract_run_data_for_config_group(noisy_simulator_path, base_path)
+    # Extract the number of qubits and circuit depth for each run in both lists
+    n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
+    circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
+    n_qubits_list_noisy = [noisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(noisy_data_list)]
+    circuit_depth_list_noisy = [noisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(noisy_data_list)]
 
     if notnoisy_constants != noisy_constants:
         print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
         print("Not-noisy constants:", notnoisy_constants)
         print("Noisy constants:", noisy_constants)
         return False
-    for idx, (notnoisy_run, noisy_run) in enumerate(zip(notnoisy_data_list, noisy_data_list)):
-        if notnoisy_run['n_qubits'] != noisy_run['n_qubits'] or notnoisy_run['circuit_depth'] != noisy_run['circuit_depth']:
-            print(f"Error: Run {idx+1} has mismatching n_qubits or circuit_depth between not-noisy and noisy simulators.")
-            print(f"Not-noisy run: n_qubits={notnoisy_run['n_qubits']}, circuit_depth={notnoisy_run['circuit_depth']}")
-            print(f"Noisy run: n_qubits={noisy_run['n_qubits']}, circuit_depth={noisy_run['circuit_depth']}")
-            return False
+    elif set(n_qubits_list_notnoisy) != set(n_qubits_list_noisy) or set(circuit_depth_list_notnoisy) != set(circuit_depth_list_noisy):
+        print("Error: The variable configuration parameters (n_qubits and circuit_depth) do not match between the not-noisy and noisy simulators.")
+        print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
+        print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
+        print("Noisy n_qubits:", n_qubits_list_noisy)
+        print("Noisy circuit_depth:", circuit_depth_list_noisy)
+        return False
 
-    print("Success: The constant configuration parameters match between the not-noisy and noisy simulators.")
+    print("Success: The variable configuration parameters match between the not-noisy and noisy simulators.")
+    print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
+    print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
+    print("Noisy n_qubits:", n_qubits_list_noisy)
+    print("Noisy circuit_depth:", circuit_depth_list_noisy)
     return True
+
+
 
 
 
