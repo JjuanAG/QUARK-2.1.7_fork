@@ -1,0 +1,106 @@
+[
+  {
+    "benchmark_backlog_item_number": 0,
+    "timestamp": "2026-05-15-10-18-56",
+    "config_hash": 8934885525726814465,
+    "total_time": 111066033.456,
+    "total_time_unit": "ms",
+    "git_revision_number": "46949c13534ea2b7800458dd188a34254a046aed",
+    "git_uncommitted_changes": false,
+    "repetition": 1,
+    "total_repetitions": 1,
+    "module": {
+      "module_name": "GenerativeModeling",
+      "module_src": "src/modules/applications/qml/generative_modeling/generative_modeling.py",
+      "module_config": {
+        "n_qubits": 6
+      },
+      "total_time": 0.004,
+      "total_time_unit": "ms",
+      "preprocessing_time": 0.004,
+      "preprocessing_time_unit": "ms",
+      "postprocessing_time": 0.0,
+      "postprocessing_time_unit": "ms",
+      "quark_job_status": "FINISHED",
+      "module_level": 0,
+      "submodule": {
+        "module_name": "DiscreteData",
+        "module_src": "src/modules/applications/qml/generative_modeling/data/data_handler/discrete_data.py",
+        "module_config": {
+          "train_size": 0.3
+        },
+        "total_time": 137.082,
+        "total_time_unit": "ms",
+        "preprocessing_time": 1.069,
+        "preprocessing_time_unit": "ms",
+        "postprocessing_time": 136.013,
+        "postprocessing_time_unit": "ms",
+        "KL_best": [
+          1.610867643844539
+        ],
+        "generalization_metrics": {
+          "fidelity": 0.07692307692307693,
+          "exploration": 0.0065,
+          "coverage": 0.1,
+          "normalized_rate": 0.0007142857142857143,
+          "precision": 0.004
+        },
+        "metrics_pandas": "benchmark_runs/generativemodeling-2026-05-15-10-13-06/benchmark_0/rep_1/data.pkl",
+        "histogram_generated": "benchmark_runs/generativemodeling-2026-05-15-10-13-06/benchmark_0/rep_1/histogram_generated.npy_1.npy",
+        "histogram_train": "benchmark_runs/generativemodeling-2026-05-15-10-13-06/benchmark_0/rep_1/histogram_train.npy_1.npy",
+        "best_parameter": "benchmark_runs/generativemodeling-2026-05-15-10-13-06/benchmark_0/rep_1/best_parameters_1.npy",
+        "module_level": 1,
+        "submodule": {
+          "module_name": "CircuitCardinality",
+          "module_src": "src/modules/applications/qml/generative_modeling/circuits/circuit_cardinality.py",
+          "module_config": {
+            "depth": 8
+          },
+          "total_time": 0.036000000000000004,
+          "total_time_unit": "ms",
+          "preprocessing_time": 0.035,
+          "preprocessing_time_unit": "ms",
+          "postprocessing_time": 0.001,
+          "postprocessing_time_unit": "ms",
+          "module_level": 2,
+          "submodule": {
+            "module_name": "LibraryQiskit",
+            "module_src": "src/modules/applications/qml/generative_modeling/mappings/library_qiskit.py",
+            "module_config": {
+              "backend": "fake_sherbrooke_simulator",
+              "n_shots": 100
+            },
+            "total_time": 3584.42,
+            "total_time_unit": "ms",
+            "preprocessing_time": 3584.419,
+            "preprocessing_time_unit": "ms",
+            "postprocessing_time": 0.001,
+            "postprocessing_time_unit": "ms",
+            "module_level": 3,
+            "submodule": {
+              "module_name": "QGAN",
+              "module_src": "src/modules/applications/qml/generative_modeling/training/qgan.py",
+              "module_config": {
+                "batch_size": 20,
+                "device": "cpu",
+                "epochs": 2,
+                "learning_rate_discriminator": 0.1,
+                "learning_rate_generator": 0.1,
+                "loss": "KL",
+                "pretrained": true
+              },
+              "total_time": 111062311.914,
+              "total_time_unit": "ms",
+              "preprocessing_time": 0.0,
+              "preprocessing_time_unit": "ms",
+              "postprocessing_time": 111062311.914,
+              "postprocessing_time_unit": "ms",
+              "module_level": 4,
+              "submodule": {}
+            }
+          }
+        }
+      }
+    }
+  }
+]
