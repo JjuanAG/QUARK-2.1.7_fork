@@ -172,6 +172,10 @@ class LibraryQiskit(LibraryGenerative):
         :param n_qubits: Number of qubits
         :return: Configured qiskit backend
         """
+        # Pre-configuration in case the user wants to use a fake backend from the IBM Quantum Platform that is not listed as an option in the dropdown menu. 
+        from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
+        provider = FakeProviderForBackendV2()
+
         if config == "cusvaer_simulator (only available in cuQuantum appliance)":
             import cusvaer  # pylint: disable=C0415
             from qiskit_aer import AerSimulator  # pylint: disable=C0415
@@ -200,6 +204,19 @@ class LibraryQiskit(LibraryGenerative):
             from qiskit_aer import AerSimulator
             fake_backend = FakeSherbrooke()
             backend = AerSimulator.from_backend(fake_backend)
+        elif config.startswith("fake_"):
+            from qiskit_aer import AerSimulator 
+            try:
+                # Fetch the fake backend directly from the provider
+                fake_backend = provider.backend(name=config)
+                backend = AerSimulator.from_backend(fake_backend)
+            except Exception as e:
+                # For the case that a backend does not exists in the provider
+                available_names = [b.name for b in provider.backends()]
+                raise ValueError(
+                    f"Could not load fake backend '{config}'. Internal error: {e}. "
+                    f"Available fake backends are: {available_names}"
+                ) from e
         elif config == "aer_statevector_simulator_gpu":
             from qiskit_aer import Aer  # pylint: disable=C0415
             backend = Aer.get_backend('statevector_simulator')
@@ -255,6 +272,10 @@ class LibraryQiskit(LibraryGenerative):
         n_shots = config_dict["n_shots"]
         n_qubits = circuit.num_qubits
         circuit_transpiled = transpile(circuit, backend=backend)
+        
+        # Pre-configuration in case the user wants to use a fake backend from the IBM Quantum Platform that is not listed as an option in the dropdown menu. 
+        from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
+        provider = FakeProviderForBackendV2()
 
         if config in ["aer_statevector_simulator_gpu", "aer_statevector_simulator_cpu"]:
             circuit_transpiled.remove_final_measurements()
@@ -302,7 +323,7 @@ class LibraryQiskit(LibraryGenerative):
             "aer_simulator_gpu",
             "qasm_simulator",
             "fake_sherbrooke_simulator"
-        ]:
+        ] or config in [b.name for b in provider.backends()]:
 
             def execute_circuit(solutions):
                 all_circuits = [
