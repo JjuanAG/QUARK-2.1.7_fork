@@ -7,6 +7,15 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+class Runtime:
+    def __init__(self, time, unit):
+        self.time = time
+        self.unit = unit
+    
+    def __repr__(self):
+        return f"{self.time} {self.unit}"
+    
+
 # TODO: Only works for discrete datasets, extend functionality to also work for continuous datasets (e.g., by adding an if statement that checks the dataset type and then extracts the relevant parameters accordingly)
 class DiscreteQGMDataExtractor:
     """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
@@ -60,7 +69,7 @@ class DiscreteQGMDataExtractor:
         return probability_distribution
     
     # Note: The following function only works for the case that the user selects the discrete dataset 
-    def get_config_parameters(self,file_path):
+    def get_config_parameters(self, file_path):
         if not os.path.exists(file_path):
             print(f"Error: File not found at {os.path.abspath(file_path)}")
             return None
@@ -138,17 +147,18 @@ class DiscreteQGMDataExtractor:
         return config_parameters
     
     def get_runtimes(self, file_path):
+        """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
+
         if not os.path.exists(file_path):
             print(f"Error: File not found at {os.path.abspath(file_path)}")
             return None
 
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
+        root, ext = os.path.splitext(file_path)
 
         try:
             if ext == '.json':
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
+                with open(file_path, 'r') as file:
+                    results = json.load(file)[0]  # returns a dictionary
             else:
                 print(f"Unsupported format: {ext}")
                 return None
@@ -157,55 +167,38 @@ class DiscreteQGMDataExtractor:
             print(f"Failed to load: {e}")
             return None
 
-        runtimes = {}
+        # --- Extract run times ---
 
-        def extract_module_name(module):
-            """
-            Extracts module name from module_src path.
-            Example:
-            src/.../discrete_data.py -> discrete_data
-            """
-            module_src = module.get("module_src", "")
+        # 1. Total run time
+        runtimes = {"all modules": {"total_runtime": Runtime(results.get("total_time"), results.get("total_time_unit"))}}
 
-            if module_src:
-                return os.path.splitext(os.path.basename(module_src))[0]
+        # 2. Recursively go into every submodule and extract the runtimes
+        def extract_module_times(current_node):
+            # Base case: if distionry is empty, return None
+            if not current_node:
+                return None
+                
+            # Check if this current layer is the one we want
+            if "module_name" in current_node:
+                runtimes.update({current_node["module_name"]: 
+                {
+                    "total_time": Runtime(current_node["total_time"], current_node["total_time_unit"]),
+                    "preprocessing_time": Runtime(current_node.get("preprocessing_time"), current_node.get("preprocessing_time_unit")),
+                    "postprocessing_time": Runtime(current_node.get("postprocessing_time"), current_node.get("postprocessing_time_unit"))
+                    }
+                     })
+                
+            # If not, check if there is a 'module' or 'submodule' layer to dive into
+            next_layer = current_node.get("module") or current_node.get("submodule")
+            if next_layer:
+                return extract_module_times(next_layer)
 
-            return "unknown_module"
-
-        def extract_module_times(module):
-            """
-            Recursively extracts timing information from modules.
-            """
-            module_name = extract_module_name(module)
-
-            metrics = module.get("metrics", {})
-
-            runtimes[module_name] = {
-                "total_time": metrics.get("total_time"),
-                "total_time_unit": metrics.get("total_time_unit"),
-                "preprocessing_time": metrics.get("preprocessing_time"),
-                "preprocessing_time_unit": metrics.get("preprocessing_time_unit"),
-                "postprocessing_time": metrics.get("postprocessing_time"),
-                "postprocessing_time_unit": metrics.get("postprocessing_time_unit"),
-            }
-
-            # Recursively process submodules
-            for submodule in module.get("submodules", []):
-                extract_module_times(submodule)
-
-        # Start recursion from application root
-        if "application" in data:
-            extract_module_times(data["application"])
-
-        # Add overall runtime
-        runtimes["summed_time"] = {
-            "total_time": data.get("total_time"),
-            "total_time_unit": data.get("total_time_unit")
-        }
-
+            # In case there is no module or submodule layer, we have reached a leaf node without finding the module_name, return None    
+            return None
+        
+        extract_module_times(results)
         return runtimes
     
-    # TODO: Extend functionality so that it can also extract the runtimes
     # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
     # TODO: Note that the algorith is hard coded to go into the subfolders names "generativemodeling..." If the user changes the name of these folders, the function will not work.
     def extract_run_data_for_config_group(self, simulator_path_name, print_results=False, print_constant_config=False):
@@ -228,23 +221,25 @@ class DiscreteQGMDataExtractor:
             
             # Locate required files based on image_e02a1d.png structure
             config_file = next(gen_folder.glob("config.yml"), None)
+            results_file = next(gen_folder.glob("results.json"), None)
             # Using rglob for nested files in benchmark_0/rep_1 subfolders
             metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
             histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
 
-            if not all([config_file, metrics_file, histogram_file]):
+            if not all([config_file, results_file, metrics_file, histogram_file]):
                 print(f"Skipping {gen_folder.name}: Missing one or more required files.")
                 continue
 
-            # --- DATA EXTRACTION ---
+            # --- Data extraction for each run ---
             config_data = self.get_config_parameters(str(config_file))
-            precision_val = self.get_precision(str(metrics_file))
+            runtimes_data = self.get_runtimes(str(results_file))
+            precision_data = self.get_precision(str(metrics_file))
             pmf_data = self.get_probability_distribution(str(histogram_file))
 
             if config_data is None:
                 continue
 
-            # --- DUPLICATE RUN CHECK ---
+            # --- Duplicate run check ---
             current_qubits = config_data.get('n_qubits')
             current_depth = config_data.get('depth')
             combination = (current_qubits, current_depth)
@@ -265,15 +260,16 @@ class DiscreteQGMDataExtractor:
             else:
                 # Compare current constants to the baseline
                 if current_constants != global_constant_config:
-                    print(f"Warning: Configuration mismatch in folder {gen_folder.name}")
+                    print(f"Warning: Mismatch of constant configuration parameters in folder {gen_folder.name}")
                     consistency_error = True
 
             # --- RESTRUCTURE RUN DATA ---
             run_entry = {
                 'n_qubits': current_qubits,
                 'circuit_depth': current_depth,
-                'precision': precision_val,
-                'pmf': pmf_data
+                'precision': precision_data,
+                'pmf': pmf_data,
+                'runtimes': runtimes_data
             }
             all_run_results.append(run_entry)
 
@@ -336,14 +332,13 @@ class VolBenchBySimulatorCategory:
         return True
 
 
-    #TODO: Extend the functionality so that it processes probability distributions and run times as well
     def noisy_notnoisy_precision_comparison(self): 
         # Run compatibility check
         self.check_for_compatible_config_groups_across_simulators()
 
         # Extract data (Unpacking the tuple: data_list, constant_config)
-        notnoisy_data_list, _ = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
-        noisy_data_list, _ = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
+        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
+        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
 
         # Helper function to extract and sort axes data
         def prepare_plot_vectors(data_list):
@@ -356,13 +351,19 @@ class VolBenchBySimulatorCategory:
 
             x = [d['n_qubits'] for d in sorted_data]
             y = [d['circuit_depth'] for d in sorted_data]
-            # Accessing 'precision' as defined in your extraction function
             z = [d['precision'] for d in sorted_data]
             return x, y, z
 
         # Prepare vectors for both simulators
-        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)
-        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)
+        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, precision for noise-free simulator
+        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, precision for noisy simulator
+
+        # Calculate precision difference between the two simulators for each corresponding run (they are in the same order after sorting)
+        precision_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
+        precision_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, precision_diff)}
+        print("Precision differences per (n_qubits, circuit_depth):")
+        for (n_qubits, circuit_depth), diff in precision_diff_per_nqubit_depth.items():
+            print(f"  ({n_qubits}, {circuit_depth}): {diff}")
 
         # Initialize 3D Plot
         fig = plt.figure(figsize=(12, 8))
@@ -370,8 +371,8 @@ class VolBenchBySimulatorCategory:
 
         # Plot curves
         # Points/markers are included to visualize individual benchmark runs
-        ax.plot(x_free, y_free, z_free, label="noise-free simulator", marker='o', linewidth=2)
-        ax.plot(x_noisy, y_noisy, z_noisy, label="noisy simulator", marker='x', linestyle='--', linewidth=2)
+        ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
+        ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
 
         # Labels and Formatting
         ax.set_xlabel('n_qubits (X)')
@@ -382,23 +383,79 @@ class VolBenchBySimulatorCategory:
 
         plt.show()
 
+    # TODO: For now, the function only takes into account the run time of all modules combined. It can be easily changed to take into account the runtime per module. 
+    def noisy_notnoisy_runtime_comparison(self): 
+        # Run compatibility check
+        self.check_for_compatible_config_groups_across_simulators()
+
+        # Extract data (Unpacking the tuple: data_list, constant_config)
+        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
+        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
+
+
+        # Helper function to extract and sort axes data
+        def prepare_plot_vectors(data_list):
+            # Sorting ensures the "curve" connects points in a logical order
+            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
+
+            if not sorted_data:
+                print("Warning: No data available to plot.")
+                return [], [], []
+
+            x = [d['n_qubits'] for d in sorted_data]
+            y = [d['circuit_depth'] for d in sorted_data]
+            z = [d['runtimes']['all modules']['total_runtime'].time for d in sorted_data]
+            return x, y, z
+
+        # Prepare vectors for both simulators
+        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, runtime for noise-free simulator
+        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, runtime for noisy simulator
+    
+
+        # Initialize 3D Plot
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plot curves
+        # Points/markers are included to visualize individual benchmark runs
+        ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
+        ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
+
+        # Labels and Formatting
+        ax.set_xlabel('n_qubits (X)')
+        ax.set_ylabel('circuit_depth (Y)')
+        ax.set_zlabel('Runtime (Z)')
+        ax.set_title('Total Runtime Comparison: Noise-Free vs Noisy Simulator')
+        ax.legend()
+
+        plt.show()
+
 
 # --- Example Usage Data Extractor ---
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
 qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
-# qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator")
+
+# Example of run parameters
+print("Start of examples:")
+run_data_example = qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator", print_results=True, print_constant_config=True)
+print(run_data_example)
+print()
+print("End of examples.")
+print("--------------------------------------------------")
+print()
+
 
 # --- Volumetric Benchmarking Comparison ---
 aer_statevector_simulator_gpu_path = r"constant_config_1\aer_statevector_simulator_gpu"
 fake_sherbrooke_simulator_path = r"constant_config_1\fake_sherbrooke_simulator"
 aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
-aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
+# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_runtime_comparison()
+
+
+
 
 def noisy_notnoisy_pmf_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
     # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the probability mass functions (PMFs) for each run.
-    pass
-
-def noisy_notnoisy_runtime_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
-    # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the runtime for each run.
     pass
