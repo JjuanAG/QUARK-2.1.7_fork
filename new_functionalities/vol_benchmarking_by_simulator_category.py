@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 # TODO: Only works for discrete datasets, extend functionality to also work for continuous datasets (e.g., by adding an if statement that checks the dataset type and then extracts the relevant parameters accordingly)
-class VolBenchQGMDataExtractor:
+class DiscreteQGMDataExtractor:
     """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
     def __init__(self, base_path):
         self.base_path = Path(base_path)
+        self.extract_run_data_for_config_group_was_called = False
 
     def get_precision(self, file_path):
         if not os.path.exists(file_path):
@@ -207,8 +208,8 @@ class VolBenchQGMDataExtractor:
     # TODO: Extend functionality so that it can also extract the runtimes
     # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
     # TODO: Note that the algorith is hard coded to go into the subfolders names "generativemodeling..." If the user changes the name of these folders, the function will not work.
-    def extract_run_data_for_config_group(self, simulator_path_name):
-        # 1. Setup the target path       
+    def extract_run_data_for_config_group(self, simulator_path_name, print_results=False, print_constant_config=False):
+        # Setup the target path       
         target_dir = self.base_path / simulator_path_name
         
         if not target_dir.exists():
@@ -218,11 +219,11 @@ class VolBenchQGMDataExtractor:
         all_run_results = []
         global_constant_config = None
         consistency_error = False
-        
-        # Track (n_qubits, depth) to detect duplicates
-        seen_combinations = set()
 
-        # 2. Iterate through all folders starting with 'generativemodeling'
+        # Track (n_qubits, depth) to detect duplicates
+        seen_combinations = {}
+
+        # Iterate through all folders starting with 'generativemodeling'
         for gen_folder in target_dir.glob("generativemodeling-*"):
             
             # Locate required files based on image_e02a1d.png structure
@@ -248,11 +249,11 @@ class VolBenchQGMDataExtractor:
             current_depth = config_data.get('depth')
             combination = (current_qubits, current_depth)
 
-            if combination in seen_combinations:
+            if combination in seen_combinations and not self.extract_run_data_for_config_group_was_called:
                 print(f"WARNING: Two runs found with the exact same number of qubits ({current_qubits}) "
-                    f"and circuit depth ({current_depth}) in folder: {gen_folder.name}")
+                    f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
             else:
-                seen_combinations.add(combination)
+                seen_combinations[combination] = gen_folder.name
 
             # --- CONFIG CONSISTENCY CHECK ---
             # Extract constants (everything EXCEPT n_qubits and depth)
@@ -279,109 +280,120 @@ class VolBenchQGMDataExtractor:
         if consistency_error:
             print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
 
-        print(f"Number of runs processed: {len(all_run_results)}")
-
         # Printing results for verification
-        for idx, run in enumerate(all_run_results):
-            print(f"Benchmark run {idx+1}: {all_run_results[idx]}")
-            
-        print()
-        print("Global Constant Config:", global_constant_config)
+        if print_results:
+            for idx, run in enumerate(all_run_results):
+                print(f"Benchmark run {idx+1}: {all_run_results[idx]}")
         
+        if print_constant_config:
+            print(f"Data from benchmark runs in directory: {target_dir} extracted successfully.")
+            print(f"Number of runs processed: {len(all_run_results)} with constant configuration parameters:" )
+            print("Global Constant Config:", global_constant_config)
+            print()
+
+        self.extract_run_data_for_config_group_was_called = True  
         return all_run_results, global_constant_config
 
 
+class VolBenchBySimulatorCategory:
+    """Class to perform volumetric benchmarking comparisons between different simulator categories (e.g., noisy vs noise-free)."""
+    def __init__(self, qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
+        self.qgm_data_object = qgm_data_object
+        self.notnoisy_simulator_path = notnoisy_simulator_path
+        self.noisy_simulator_path = noisy_simulator_path
 
-############
-base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
-base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
-qgm_data_extractor = VolBenchQGMDataExtractor(base_path_itwm)
+    def check_for_compatible_config_groups_across_simulators(self):
+        notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
+        noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
+        # Extract the number of qubits and circuit depth for each run in both lists
+        n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
+        circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
+        n_qubits_list_noisy = [noisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(noisy_data_list)]
+        circuit_depth_list_noisy = [noisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(noisy_data_list)]
 
+        if len(notnoisy_data_list) != len(noisy_data_list):
+            print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
+            return
 
-# --- Example Usage ---
-qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator")
-# extract_benchmark_run_data_for_config_group(r"constant_config_1\aer_statevector_simulator_gpu", base_path_pc)
-# --- ---
+        elif notnoisy_constants != noisy_constants:
+            print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
+            print("Not-noisy constants:", notnoisy_constants)
+            print("Noisy constants:", noisy_constants)
+            return False
+        elif set(n_qubits_list_notnoisy) != set(n_qubits_list_noisy) or set(circuit_depth_list_notnoisy) != set(circuit_depth_list_noisy):
+            print("Error: The variable configuration parameters (n_qubits and circuit_depth) do not match between the not-noisy and noisy simulators.")
+            print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
+            print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
+            print("Noisy n_qubits:", n_qubits_list_noisy)
+            print("Noisy circuit_depth:", circuit_depth_list_noisy)
+            return False
 
-def check_for_compatible_config_groups_across_simulators(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
-    notnoisy_data_list, notnoisy_constants = qgm_data_object.extract_run_data_for_config_group(notnoisy_simulator_path)
-    noisy_data_list, noisy_constants = qgm_data_object.extract_run_data_for_config_group(noisy_simulator_path)
-    # Extract the number of qubits and circuit depth for each run in both lists
-    n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
-    circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
-    n_qubits_list_noisy = [noisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(noisy_data_list)]
-    circuit_depth_list_noisy = [noisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(noisy_data_list)]
-
-    if len(notnoisy_data_list) != len(noisy_data_list):
-        print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
-        return
-
-    elif notnoisy_constants != noisy_constants:
-        print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
-        print("Not-noisy constants:", notnoisy_constants)
-        print("Noisy constants:", noisy_constants)
-        return False
-    elif set(n_qubits_list_notnoisy) != set(n_qubits_list_noisy) or set(circuit_depth_list_notnoisy) != set(circuit_depth_list_noisy):
-        print("Error: The variable configuration parameters (n_qubits and circuit_depth) do not match between the not-noisy and noisy simulators.")
+        print("Success: The variable configuration parameters match between the not-noisy and noisy simulators.")
         print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
         print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
         print("Noisy n_qubits:", n_qubits_list_noisy)
         print("Noisy circuit_depth:", circuit_depth_list_noisy)
-        return False
-
-    print("Success: The variable configuration parameters match between the not-noisy and noisy simulators.")
-    print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
-    print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
-    print("Noisy n_qubits:", n_qubits_list_noisy)
-    print("Noisy circuit_depth:", circuit_depth_list_noisy)
-    return True
+        return True
 
 
-#TODO: Extend the functionality so that it processes probability distributions and run times as well
-#TODO: Not runs with noisy simulators have been done yet
-def noisy_notnoisy_precision_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path): 
-    # Run compatibility check
-    check_for_compatible_config_groups_across_simulators(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path)
+    #TODO: Extend the functionality so that it processes probability distributions and run times as well
+    def noisy_notnoisy_precision_comparison(self): 
+        # Run compatibility check
+        self.check_for_compatible_config_groups_across_simulators()
 
-    # Extract data (Unpacking the tuple: data_list, constant_config)
-    notnoisy_data_list, _ = qgm_data_object.extract_run_data_for_config_group(notnoisy_simulator_path)
-    noisy_data_list, _ = qgm_data_object.extract_run_data_for_config_group(noisy_simulator_path)
+        # Extract data (Unpacking the tuple: data_list, constant_config)
+        notnoisy_data_list, _ = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
+        noisy_data_list, _ = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
 
-    # Helper function to extract and sort axes data
-    def prepare_plot_vectors(data_list):
-        # Sorting ensures the "curve" connects points in a logical order
-        sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
-        x = [d['n_qubits'] for d in sorted_data]
-        y = [d['circuit_depth'] for d in sorted_data]
-        # Accessing 'precision' as defined in your extraction function
-        z = [d['precision'] for d in sorted_data]
-        return x, y, z
+        # Helper function to extract and sort axes data
+        def prepare_plot_vectors(data_list):
+            # Sorting ensures the "curve" connects points in a logical order
+            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
 
-    # Prepare vectors for both simulators
-    x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)
-    x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)
+            if not sorted_data:
+                print("Warning: No data available to plot.")
+                return [], [], []
 
-    # Initialize 3D Plot
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111, projection='3d')
+            x = [d['n_qubits'] for d in sorted_data]
+            y = [d['circuit_depth'] for d in sorted_data]
+            # Accessing 'precision' as defined in your extraction function
+            z = [d['precision'] for d in sorted_data]
+            return x, y, z
 
-    # Plot curves
-    # Points/markers are included to visualize individual benchmark runs
-    ax.plot(x_free, y_free, z_free, label="noise-free simulator", marker='o', linewidth=2)
-    ax.plot(x_noisy, y_noisy, z_noisy, label="noisy simulator", marker='x', linestyle='--', linewidth=2)
+        # Prepare vectors for both simulators
+        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)
+        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)
 
-    # Labels and Formatting
-    ax.set_xlabel('n_qubits (X)')
-    ax.set_ylabel('circuit_depth (Y)')
-    ax.set_zlabel('Precision (Z)')
-    ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
-    ax.legend()
+        # Initialize 3D Plot
+        fig = plt.figure(figsize=(12, 8))
+        ax = fig.add_subplot(111, projection='3d')
 
-    plt.show()
+        # Plot curves
+        # Points/markers are included to visualize individual benchmark runs
+        ax.plot(x_free, y_free, z_free, label="noise-free simulator", marker='o', linewidth=2)
+        ax.plot(x_noisy, y_noisy, z_noisy, label="noisy simulator", marker='x', linestyle='--', linewidth=2)
+
+        # Labels and Formatting
+        ax.set_xlabel('n_qubits (X)')
+        ax.set_ylabel('circuit_depth (Y)')
+        ax.set_zlabel('Precision (Z)')
+        ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
+        ax.legend()
+
+        plt.show()
 
 
+# --- Example Usage Data Extractor ---
+base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
+base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
+qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
+# qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator")
 
-noisy_notnoisy_precision_comparison(qgm_data_extractor, r"constant_config_1\aer_statevector_simulator_gpu", r"constant_config_1\fake_sherbrooke_simulator")
+# --- Volumetric Benchmarking Comparison ---
+aer_statevector_simulator_gpu_path = r"constant_config_1\aer_statevector_simulator_gpu"
+fake_sherbrooke_simulator_path = r"constant_config_1\fake_sherbrooke_simulator"
+aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
 
 def noisy_notnoisy_pmf_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
     # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the probability mass functions (PMFs) for each run.
