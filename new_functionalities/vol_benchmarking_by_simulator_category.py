@@ -1,11 +1,13 @@
 import os
 import json
 import pickle
+import pandas as pd
 import numpy as np
 import yaml
 from pathlib import Path
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import seaborn as sns
 
 class Runtime:
     def __init__(self, time, unit):
@@ -365,23 +367,59 @@ class VolBenchBySimulatorCategory:
         for (n_qubits, circuit_depth), diff in precision_diff_per_nqubit_depth.items():
             print(f"  ({n_qubits}, {circuit_depth}): {diff}")
 
-        # Initialize 3D Plot
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        # Restructure dictionary into a sorted matrix DataFrame
+        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in precision_diff_per_nqubit_depth.items()]
+        df = pd.DataFrame(df_data)
+        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
+        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
 
-        # Plot curves
-        # Points/markers are included to visualize individual benchmark runs
-        ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
-        ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
 
-        # Labels and Formatting
-        ax.set_xlabel('n_qubits (X)')
-        ax.set_ylabel('circuit_depth (Y)')
-        ax.set_zlabel('Precision (Z)')
-        ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
-        ax.legend()
+        # ==========================================
+        # Plotting both the 3D curve and the matrix heatmap side by side
+        # ==========================================
+        fig = plt.figure(figsize=(20, 8))
+
+        # Subplot 1: The Original 3D Plot
+        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
+
+        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2)
+        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2)
+
+        ax1.set_xlabel("n_qubits (X)")
+        ax1.set_ylabel("circuit_depth (Y)")
+        ax1.set_zlabel("Precision (Z)")
+        ax1.set_title("Precision Comparison: Noise-Free vs Noisy")
+        ax1.legend()
+
+
+        # Subplot 2: Matrix Heatmap
+        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
+
+        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
+        ax2.set_title("Precision Difference Matrix")
+        ax2.set_xlabel("Number of Qubits (Columns)")
+        ax2.set_ylabel("Circuit Depth (Rows)")
 
         plt.show()
+
+        # Initialize 3D Plot
+        # fig = plt.figure(figsize=(12, 8))
+        # ax = fig.add_subplot(111, projection='3d')
+
+        # # Plot curves
+        # # Points/markers are included to visualize individual benchmark runs
+        # ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
+        # ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
+
+        # # Labels and Formatting
+        # ax.set_xlabel('n_qubits (X)')
+        # ax.set_ylabel('circuit_depth (Y)')
+        # ax.set_zlabel('Precision (Z)')
+        # ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
+        # ax.legend()
+
+        # plt.show()
+
 
     # TODO: For now, the function only takes into account the run time of all modules combined. It can be easily changed to take into account the runtime per module. 
     def noisy_notnoisy_runtime_comparison(self): 
@@ -429,6 +467,8 @@ class VolBenchBySimulatorCategory:
         ax.legend()
 
         plt.show()
+
+
 
 
 # --- Example Usage Data Extractor ---
