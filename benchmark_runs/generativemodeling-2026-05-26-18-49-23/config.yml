@@ -6,34 +6,34 @@ application:
   submodules:
   - config:
       train_size:
-      - 0.3
+      - - 0.3
     name: Discrete Data
     submodules:
     - config:
         depth:
-        - 2
+        - - 2
       name: CircuitCardinality
       submodules:
       - config:
           backend:
-          - fake_hanoi
+          - - aer_statevector_simulator_gpu
           n_shots:
-          - 100
+          - - 100
         name: LibraryQiskit
         submodules:
         - config:
             batch_size:
-            - 20
+            - - 20
             device:
             - cpu
             epochs:
-            - 2
+            - - 2
             learning_rate_discriminator:
-            - 0.1
+            - - 0.1
             learning_rate_generator:
-            - 0.1
+            - - 0.1
             loss:
-            - KL
+            - - KL
             pretrained:
             - true
           name: QGAN

@@ -25,7 +25,7 @@ from typing import Optional
 
 import numpy as np
 
-from config_manager import ConfigManager
+from config_manager import ConfigManager, ConfigManagerFactorySweep
 from benchmark_record import BenchmarkRecord, BenchmarkRecordStored
 from plotter import Plotter
 from modules.core import Core
@@ -187,6 +187,15 @@ class BenchmarkManager:
         if comm.Get_rank() == 0:
             results = self._collect_all_results()
             self._save_as_json(results)
+    
+    def orchestrate_benchmark_sweep(self, sweep_benchmark_config_manager: ConfigManagerFactorySweep, app_modules: list[dict], store_dir: str = None) -> None:
+        """
+
+        """
+        individual_config_manager_objects = sweep_benchmark_config_manager.config_manager_list
+        for config_manager in individual_config_manager_objects:
+            self.orchestrate_benchmark(config_manager, app_modules, store_dir)
+
 
     def run_benchmark(self, benchmark_backlog: list, repetitions: int) -> None:  # pylint: disable=R0915
         """

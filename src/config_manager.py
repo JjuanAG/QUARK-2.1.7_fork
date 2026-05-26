@@ -461,3 +461,150 @@ class ConfigManager:
                 for submodule in config["submodules"]:
                     graph.add_edge(key, submodule["name"])
                     ConfigManager._create_tree_figure_helper(graph, submodule)
+
+
+# --- Sweep benchmark run related code ---
+
+import json
+import itertools
+from copy import deepcopy
+
+class ConfigManagerFactorySweep:
+    """
+    Factory class to create ConfigManager instances for sweep benchmarks.
+    Matches the updated flat-baseline + sweep layout config schema.
+    """
+
+    def __init__(self):
+        self.config_manager_list: list[ConfigManager] = []
+
+    @staticmethod
+    def _update_param_in_tree(module_dict: dict, param_key: str, assigned_value: list) -> bool:
+        """
+        Recursively traverses the nested module tree to locate where `param_key` 
+        lives inside a module's "config" map, updating it in place while 
+        preserving adjacent baseline sibling parameters (like n_shots).
+        """
+        if "config" in module_dict and module_dict["config"] is not None:
+            if param_key in module_dict["config"]:
+                # Safely update the key while retaining everything else in this block
+                module_dict["config"][param_key] = assigned_value
+                return True
+
+        if "submodules" in module_dict and module_dict["submodules"]:
+            for submodule in module_dict["submodules"]:
+                if ConfigManagerFactorySweep._update_param_in_tree(submodule, param_key, assigned_value):
+                    # Continue traversal in case multiple submodules use the same parameter key
+                    pass
+        return False
+
+    @staticmethod
+    def get_single_configs_from_sweep(sweep_config: dict) -> list[dict]:
+        """
+        Transforms the new sweep configuration template into standalone, 
+        QUARK-compliant raw data configurations.
+        """
+        individual_configs = []
+        repetitions = sweep_config.get("repetitions", 1)
+        
+        # Matches the updated key format where 'application' is directly at the root level
+        baseline_config = sweep_config["baseline"]["application"]
+        if not baseline_config:
+            raise KeyError("Your sweep layout configuration file is missing the root level 'application' tree!")
+
+        # Process each designated parameter matrix group
+        for sweep_group in sweep_config.get("sweeps", []):
+            name = sweep_group.get("name", "Unnamed Sweep Group")
+            logging.info(f"Processing sweep group: {name}")
+            print(f"Processing sweep group: {name}")  # for debugging
+            
+            params_list = sweep_group.get("sweep_parameters", [])
+            if not params_list:
+                continue
+
+            param_keys = [p["parameter"] for p in params_list]
+            param_values = [p["values"] for p in params_list]
+
+            # Compute the Cartesian product (calculation of every possible pairing) for parameters defined WITHIN THIS SWEEP GROUP
+            for combination in itertools.product(*param_values):
+                
+                # Deep copy ensures every combination is generated from a clean baseline tree instance
+                mutated_config = deepcopy(baseline_config)
+
+                # Patch keys down the tree node steps
+                for param_key, current_value in zip(param_keys, combination):
+                    ConfigManagerFactorySweep._update_param_in_tree(
+                        module_dict=mutated_config,
+                        param_key=param_key,
+                        assigned_value=[current_value]  # Kept inside a list format to satisfy QUARK requirements
+                    )
+
+                # Reassemble the target dictionary context structure expected by QUARK
+                inner_config_tree = {
+                    "application": mutated_config,
+                    "repetitions": repetitions
+                }
+
+                # Serialize the inner tree context data into an isolated JSON dictionary text block
+                quark_compliant_wrapper = {
+                    "config": json.dumps(inner_config_tree)
+                }
+
+                individual_configs.append(quark_compliant_wrapper)
+
+        return individual_configs
+
+    def set_sweep_config_manager(self, sweep_config: dict) -> None:
+        """
+        Processes your raw configuration dictionary list, generates separate ConfigManager 
+        instances, and executes QUARK's load_config mappings to unpack class instances.
+        """
+        individual_configs = self.get_single_configs_from_sweep(sweep_config)
+        
+        for config_dict in individual_configs:
+            config_manager = ConfigManager()
+            
+            # Unpack the stringified raw config JSON back into a valid dictionary pattern
+            config_manager.set_config(json.loads(config_dict["config"]))
+            
+            self.config_manager_list.append(config_manager)
+
+
+# Example usage sweep:
+
+sweep_file_test_path = r"/home/juana/QUARK-2.1.7_fork/config_files/sweep_configurations/test.yml"
+
+# 1. Use the yaml package handler to read .yml files safely
+with open(sweep_file_test_path, "r") as f:
+    sweep_benchmark_config = yaml.load(f, Loader=yaml.FullLoader)
+
+# 2. Feed the configuration dictionary directly to your factory class
+factory = ConfigManagerFactorySweep()
+factory.set_sweep_config_manager(sweep_benchmark_config)
+config_manager_1 = factory.config_manager_list[1]  # For debugging: print the first generated ConfigManager's config to verify correctness
+config_manager_1.print()
+# config_manager_1.get_config()["application"].print()  # For debugging: print the application part of the first generated config to verify correctness
+
+# Verify results 
+print(f"\nSuccessfully generated {len(factory.config_manager_list)} independent ConfigManager object instances.")
+
+
+# Example usage simple:
+
+# single_file_test_path = r"/home/juana/QUARK-2.1.7_fork/config_files/qgm_config_fake_backend_test.yml"
+
+# # 1. Use the yaml package handler to read .yml files safely
+# print()
+# with open(single_file_test_path, "r") as f:
+#     single_benchmark_config = yaml.load(f, Loader=yaml.FullLoader)
+
+# # 2. Feed the configuration dictionary directly to your factory class
+# config_manager = ConfigManager()
+# config_manager.set_config(single_benchmark_config)
+# config_manager.print()  # For debugging: print the generated ConfigManager's config to verify correctness
+
+
+
+
+
+

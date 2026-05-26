@@ -1,7 +1,7 @@
 application:
   config:
     n_qubits:
-    - 6
+    - 8
   name: GenerativeModeling
   submodules:
   - config:
@@ -16,7 +16,7 @@ application:
       submodules:
       - config:
           backend:
-          - fake_hanoi
+          - aer_statevector_simulator_gpu
           n_shots:
           - 100
         name: LibraryQiskit

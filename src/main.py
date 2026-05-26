@@ -124,6 +124,9 @@ def create_benchmark_parser(parser: argparse.ArgumentParser):
     parser.add_argument('-rd', '--resume-dir', nargs='?', help='Provide results directory of the job to be resumed')
     parser.add_argument('-ff', '--failfast', help='Flag whether a single failed benchmark run causes QUARK to fail',
                         required=False, action=argparse.BooleanOptionalAction)
+    # NEW FLAG ADDED HERE:
+    parser.add_argument("--sweep", help="Flag indicating if the provided config is a sweep layout", 
+                        action=argparse.BooleanOptionalAction, default=False)
 
     parser.set_defaults(goal='benchmark')
 
@@ -172,7 +175,7 @@ def handle_benchmark_run(args: argparse.Namespace) -> None:
             # Gets current env here
             installer = Installer()
             app_modules = installer.get_env(installer.get_active_env())
-
+        
         if args.config or args.resume_dir:
             if not args.config:
                 args.config = os.path.join(args.resume_dir, "config.yml")
@@ -206,6 +209,100 @@ def handle_benchmark_run(args: argparse.Namespace) -> None:
                 results = benchmark_manager.load_results()
                 Plotter.visualize_results(results, benchmark_manager.store_dir)
 
+def handle_benchmark_run_test(args: argparse.Namespace) -> None:
+    """
+    Handles the different options of a benchmark run.
+
+    :param args: Namespace with the arguments given by the user
+    """
+    from benchmark_manager import BenchmarkManager  # pylint: disable=C0415
+    from plotter import Plotter  # pylint: disable=C0415
+
+    benchmark_manager = BenchmarkManager(fail_fast=args.failfast)
+
+    if args.summarize:
+        benchmark_manager.summarize_results(args.summarize)
+        return  # Short circuit after summarization
+
+    # 1. Resolve Module Environments
+    if args.modules:
+        logging.info(f"Load application modules configuration from {args.modules}")
+        base_dir = os.path.dirname(args.modules)
+        with open(args.modules) as filehandler:
+            app_modules = _expand_paths(json.loads(
+                _filter_comments(filehandler)), base_dir
+            )
+    else:
+        installer = Installer()
+        app_modules = installer.get_env(installer.get_active_env())
+
+    # 2. Determine Strategy: SWEEP RUN vs SINGLE RUN
+    if args.config and args.sweep:
+        logging.info(f"Initiating Parameter Sweep Pipeline using: {args.config}")
+        
+        # Safe import of your newly built Factory class
+        from config_manager import ConfigManagerFactorySweep  # Ensure this matches your package location
+        
+        # Load the .yml sweep layout configuration map
+        with open(args.config, "r") as filehandler:
+            try:
+                sweep_benchmark_config = yaml.load(filehandler, Loader=yaml.FullLoader)
+            except Exception as e:
+                logging.exception("Problem loading the given sweep config file")
+                raise ValueError("Sweep config file must be a valid YAML matrix layout!") from e
+        
+        # Generate the separate ConfigManagers via factory unpacker
+        factory = ConfigManagerFactorySweep()
+        factory.set_sweep_config_manager(sweep_benchmark_config)
+        
+        # Run your custom sequential runner loop across all variants
+        logging.info(f"Executing {len(factory.config_manager_list)} nested configs derived from sweep...")
+        for config_manager in factory.config_manager_list:
+            benchmark_manager.orchestrate_benchmark(
+                config_manager, app_modules, store_dir=None
+            )
+            
+        # Post-processing collection wrapper block
+        comm.Barrier()
+        if comm.Get_rank() == 0:
+            results = benchmark_manager.load_results()
+            Plotter.visualize_results(results, benchmark_manager.store_dir)
+
+    else:
+        # LEGACY/STANDARD RUN PIPELINE PATHWAY (Preserves default interactive & single config runs)
+        from config_manager import ConfigManager  # pylint: disable=C0415
+        config_manager = ConfigManager()
+
+        if args.config or args.resume_dir:
+            if not args.config:
+                args.config = os.path.join(args.resume_dir, "config.yml")
+            logging.info(f"Provided config file at {args.config}")
+            with open(args.config) as filehandler:
+                try:
+                    benchmark_config = yaml.load(filehandler, Loader=yaml.FullLoader)
+                except Exception as e:
+                    logging.exception("Problem loading the given config file")
+                    raise ValueError("Config file needs to be a valid QUARK YAML Config!") from e
+
+                config_manager.set_config(benchmark_config)
+        else:
+            config_manager.generate_benchmark_configs(app_modules)
+
+        if args.createconfig:
+            logging.info("Selected config is:")
+            config_manager.print()
+        else:
+            interrupted_results_path = None if args.resume_dir is None else os.path.join(
+                args.resume_dir, "results.json"
+            )
+            benchmark_manager.orchestrate_benchmark(
+                config_manager, app_modules,
+                interrupted_results_path=interrupted_results_path
+            )
+            comm.Barrier()
+            if comm.Get_rank() == 0:
+                results = benchmark_manager.load_results()
+                Plotter.visualize_results(results, benchmark_manager.store_dir)
 
 def handler_env_run(args: argparse.Namespace) -> None:
     """
@@ -242,7 +339,7 @@ def main() -> None:
             handler_env_run(args)
 
         else:
-            handle_benchmark_run(args)
+            handle_benchmark_run_test(args)
 
         logging.info(" ============================================================ ")
         logging.info(" ====================  QUARK finished!   ==================== ")

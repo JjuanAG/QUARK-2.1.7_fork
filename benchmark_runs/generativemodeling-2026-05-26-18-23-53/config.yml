@@ -1,0 +1,22 @@
+application:
+  config:
+    n_qubits:
+    - 6
+  name: GenerativeModeling
+  submodules:
+  - config:
+      train_size:
+      - 0.3
+    name: Discrete Data
+    submodules:
+    - config:
+        depth:
+        - 4
+      name: CircuitCardinality
+      submodules:
+      - config:
+          backend:
+          - aer_statevector_simulator_cpu
+        name: LibraryQiskit
+        submodules: []
+repetitions: 1
