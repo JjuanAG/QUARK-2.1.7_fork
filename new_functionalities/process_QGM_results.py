@@ -96,11 +96,17 @@ def process_quark_data(file_path, title='QUARK Data Visualization', print_summar
 base_path_pc = r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1"
 base_path_itwm = r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\unsorted\generativemodeling-2026-04-15-09-28-03\benchmark_0\rep_1"
 
+# print("QUARK Benchmark Files:")
+# print("Metrics:", pd.read_pickle(base_path_itwm + "\\data_1.pkl").shape)
+# print("Gen histogram:", np.load(base_path_itwm + "\\histogram_generated.npy").shape)
+# print("Train histogram:", np.load(base_path_itwm + "\\histogram_train.npy").shape)
+# print("Best params:", np.load(base_path_itwm + "\\best_parameters_1.npy", allow_pickle=True))
+
 print("QUARK Benchmark Files:")
-print("Metrics:", pd.read_pickle(base_path_itwm + "\\data_1.pkl").shape)
-print("Gen histogram:", np.load(base_path_itwm + "\\histogram_generated.npy").shape)
-print("Train histogram:", np.load(base_path_itwm + "\\histogram_train.npy").shape)
-print("Best params:", np.load(base_path_itwm + "\\best_parameters_1.npy", allow_pickle=True))
+print("Metrics:", pd.read_pickle(base_path_pc + "\\data_1.pkl").shape)
+print("Gen histogram:", np.load(base_path_pc + "\\histogram_generated.npy").shape)
+print("Train histogram:", np.load(base_path_pc + "\\histogram_train.npy").shape)
+print("Best params:", np.load(base_path_pc + "\\best_parameters_1.npy", allow_pickle=True))
 
 def raw_dump_quark_file(base_path, file_name):
     """
@@ -156,4 +162,4 @@ files = [
 ]
 
 for f in files:
-    raw_dump_quark_file(base_path_itwm, f)
+    raw_dump_quark_file(base_path_pc, f)
