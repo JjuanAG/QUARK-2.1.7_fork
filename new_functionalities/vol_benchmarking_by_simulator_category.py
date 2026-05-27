@@ -6,6 +6,7 @@ import numpy as np
 import yaml
 from pathlib import Path
 import matplotlib.pyplot as plt
+import math
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 
@@ -172,7 +173,7 @@ class DiscreteQGMDataExtractor:
         # --- Extract run times ---
 
         # 1. Total run time
-        runtimes = {"all modules": {"total_runtime": Runtime(results.get("total_time"), results.get("total_time_unit"))}}
+        runtimes = {"all_modules": {"total_time": Runtime(results.get("total_time"), results.get("total_time_unit"))}}
 
         # 2. Recursively go into every submodule and extract the runtimes
         def extract_module_times(current_node):
@@ -199,7 +200,6 @@ class DiscreteQGMDataExtractor:
             return None
         
         extract_module_times(results)
-
 
         return runtimes
     
@@ -383,8 +383,8 @@ class VolBenchBySimulatorCategory:
         # Subplot 1: The Original 3D Plot
         ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
 
-        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2)
-        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2)
+        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
+        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
 
         ax1.set_xlabel("n_qubits (X)")
         ax1.set_ylabel("circuit_depth (Y)")
@@ -403,26 +403,7 @@ class VolBenchBySimulatorCategory:
 
         plt.show()
 
-        # Initialize 3D Plot
-        # fig = plt.figure(figsize=(12, 8))
-        # ax = fig.add_subplot(111, projection='3d')
 
-        # # Plot curves
-        # # Points/markers are included to visualize individual benchmark runs
-        # ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
-        # ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
-
-        # # Labels and Formatting
-        # ax.set_xlabel('n_qubits (X)')
-        # ax.set_ylabel('circuit_depth (Y)')
-        # ax.set_zlabel('Precision (Z)')
-        # ax.set_title('Precision Comparison: Noise-Free vs Noisy Simulator')
-        # ax.legend()
-
-        # plt.show()
-
-
-    # TODO: For now, the function only takes into account the run time of all modules combined. It can be easily changed to take into account the runtime per module. 
     def noisy_notnoisy_single_module_runtime_comparison(self, module_name=None): 
         # Run compatibility check
         self.check_for_compatible_config_groups_across_simulators()
@@ -479,29 +460,179 @@ class VolBenchBySimulatorCategory:
         matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
         matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
 
-        # TODO add matrix plot
-        
-        # Initialize 3D Plot
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
+        # ==========================================
+        # Plotting both the 3D curve and the matrix heatmap side by side
+        # ==========================================
+        fig = plt.figure(figsize=(20, 8))
 
-        # Plot curves
-        # Points/markers are included to visualize individual benchmark runs
-        ax.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker='o', linewidth=2)
-        ax.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker='x', linestyle='--', linewidth=2)
+        # Subplot 1: The Original 3D Plot
+        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
 
-        # Labels and Formatting
-        ax.set_xlabel('n_qubits (X)')
-        ax.set_ylabel('circuit_depth (Y)')
-        ax.set_zlabel('Runtime (Z)')
-        ax.set_title(f'{module_name} total runtime Comparison: Noise-Free vs Noisy Simulator')
-        ax.legend()
+        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
+        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
+
+        ax1.set_xlabel("n_qubits")
+        ax1.set_ylabel("circuit_depth")
+        ax1.set_zlabel(f"Runtime ({unit_free})")
+        ax1.set_title(f"{module_name} total runtime Comparison: Noise-Free vs Noisy")
+        ax1.legend()
+
+
+        # Subplot 2: Matrix Heatmap
+        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
+
+        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
+        ax2.set_title(f"{module_name} total runtime Difference Matrix in {unit_free} (Noise-Free - Noisy)")
+        ax2.set_xlabel("Number of Qubits (Columns)")
+        ax2.set_ylabel("Circuit Depth (Rows)")
 
         plt.show()
 
-    def noisy_notnoisy_runtime_comparison(self, module_name=None):
-        pass
-        # TODO: implement this function: Idea is to plot all of the DIFFERENCE runtimes for every module (pre + postprocessing time) between noisy and noise free simulators
+    def noisy_notnoisy_modular_runtime_comparison(self):
+        # Run compatibility check
+        self.check_for_compatible_config_groups_across_simulators()
+
+        # Extract data (Unpacking the tuple: data_list, constant_config)
+        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
+        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
+
+        # Helper function to extract and sort axes data
+        def prepare_plot_vectors(data_list):
+            # Sorting ensures the "curve" connects points in a logical order
+            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
+            module_names = sorted_data[0]['runtimes'].keys() if sorted_data else []
+
+            print(module_names)
+            if not sorted_data:
+                print("Warning: No data available to plot.")
+                return [], [], []
+
+            x = [d['n_qubits'] for d in sorted_data]
+            y = [d['circuit_depth'] for d in sorted_data]
+    
+            runtime_by_module = {}
+            for module_name in module_names:
+                z = [d['runtimes'][module_name]['total_time'].time for d in sorted_data]
+                runtime_by_module[module_name] = z
+
+                # extract units and check for consistency
+                units = [d['runtimes'][module_name]['total_time'].unit for d in sorted_data]
+                if len(set(units)) > 1:
+                    print(f"Error: Inconsistent time units found in the runtimes for module '{module_name}'. Units found: {set(units)}")
+                    return None, None, None
+            return x, y, runtime_by_module, units[0]  # return the common unit as well
+
+        # Prepare vectors for both simulators
+        x_free, y_free, runtime_by_module_free, unit_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, runtime for every noise-free simulator module
+        x_noisy, y_noisy, runtime_by_module_noisy, unit_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, runtime for every noisy simulator module
+
+        if unit_free != unit_noisy:
+            print(f"Error: Time units for the runtimes of the modules between the not-noisy and noisy simulators do not match. Not-noisy unit: {unit_free}, Noisy unit: {unit_noisy}")
+            return None
+
+        # ==========================================
+        # Plotting both the 3D curve and the matrix heatmap
+        # ==========================================
+        
+        # ------------------------------------------
+        # 1. 3D plots for each module (Figure 1)
+        # ------------------------------------------
+
+        # Figure out how many modules there are to determine the grid shape for the subplots
+        num_modules = len(runtime_by_module_free)
+
+        # Decide on a fixed number of columns (e.g., 3 subplots per row looks good)
+        num_cols = 3
+        # Calculate how many rows we need (e.g., 6 modules / 3 cols = 2 rows)
+        num_rows = math.ceil(num_modules / num_cols)
+
+        # Adjust figure size dynamically based on the grid shape
+        fig3d = plt.figure(figsize=(5 * num_cols, 5 * num_rows))
+
+        # Using enumerate(..., 1) lets 'idx' count up starting from 1
+        for idx, module_name in enumerate(list(runtime_by_module_free.keys()), 1):
+            
+            # Grid dimensions are dynamically calculated (num_rows, num_cols)
+            ax = fig3d.add_subplot(num_rows, num_cols, idx, projection="3d")
+            
+            # Plot the noise-free data for this specific module
+            ax.plot(x_free, y_free, runtime_by_module_free[module_name], marker="o", linewidth=2, label=f"{notnoisy_constant_config.get('backend')}")
+            
+            # Plot the noisy data for this specific module
+            ax.plot(x_noisy, y_noisy, runtime_by_module_noisy[module_name], marker="x", linestyle="--", linewidth=2, label=f"{noisy_constant_config.get('backend')}")
+
+            # Set up labels and unique title for THIS specific module's subplot
+            ax.set_xlabel("n_qubits")
+            ax.set_ylabel("circuit_depth")
+            ax.set_zlabel(f"Runtime ({unit_free})")
+            ax.set_title(f"{module_name} Runtime Comparison")
+            ax.legend()
+
+        # Automatically adjust padding so nothing overlaps
+        fig3d.tight_layout()
+        plt.show()  # Displays the 3D grid figure window
+
+
+
+        # ------------------------------------------
+        # 2. Calculate Difference Matrices (Data Prep)
+        # ------------------------------------------
+        
+        # Calculate runtime difference between the two simulators for each corresponding run
+        runtime_diff_by_module = {
+            module_name: [zf - zn for zf, zn in zip(runtime_by_module_free[module_name], runtime_by_module_noisy[module_name])] 
+            for module_name in runtime_by_module_free.keys()
+        }
+
+        # Restructure data into sorted matrix DataFrames for every module name
+        matrices_by_module = {}
+        for module_name, diff_list in runtime_diff_by_module.items():
+            runtime_diff_per_nqubit_depth = {(q, d): diff for q, d, diff in zip(x_free, y_free, diff_list)}
+            df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in runtime_diff_per_nqubit_depth.items()]
+            df = pd.DataFrame(df_data)
+            
+            matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")
+            matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)
+            matrices_by_module[module_name] = matrix_df
+
+
+
+        # ------------------------------------------
+        # 3. Matrix Heatmaps for each module (Figure 2)
+        # ------------------------------------------
+        
+        # We use the same dynamic grid layout logic as the 3D plots
+        num_cols_heatmap = 3
+        num_rows_heatmap = math.ceil(num_modules / num_cols_heatmap)
+
+        # Create a completely separate, dedicated figure window for the heatmaps
+        fig_heatmap = plt.figure(figsize=(6 * num_cols_heatmap, 5 * num_rows_heatmap))
+
+        for idx, (module_name, matrix_df) in enumerate(matrices_by_module.items(), 1):
+            
+            # Dynamically set up the subplot grid position
+            ax2 = fig_heatmap.add_subplot(num_rows_heatmap, num_cols_heatmap, idx)
+            
+            # Generate the heatmap for this module
+            sns.heatmap(
+                matrix_df, 
+                annot=True, 
+                fmt=".4f", 
+                cmap="coolwarm", 
+                center=0, 
+                ax=ax2,
+                cbar_kws={'label': f'Difference ({unit_free})'}
+            )
+            
+            # Titles and axes configuration
+            ax2.set_title(f"{module_name} Runtime Difference\n(Noise-Free - Noisy)")
+            ax2.set_xlabel("Number of Qubits (Columns)")
+            ax2.set_ylabel("Circuit Depth (Rows)")
+
+        # Layout fix for the heatmap figure and then reveal it
+        fig_heatmap.tight_layout()
+        plt.show()  # Displays the Heatmap grid figure window
+
 
 
 
@@ -525,8 +656,10 @@ qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
 aer_statevector_simulator_gpu_path = r"constant_config_1\aer_statevector_simulator_gpu"
 fake_sherbrooke_simulator_path = r"constant_config_1\fake_sherbrooke_simulator"
 aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
+
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
-aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
+# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
 
 
 
