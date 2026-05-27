@@ -48,6 +48,59 @@ class DiscreteQGMDataExtractor:
         precision = data.get('precision', None) if isinstance(data, dict) else None
 
         return precision
+
+    def get_KL_best(self, file_path):
+        """"Extracts the best KL divergence value from the results.json file of a benchmark run. Returns the best KL divergence value."""
+        if not os.path.exists(file_path):
+            print(f"Error: File not found at {os.path.abspath(file_path)}")
+            return None
+
+        root, ext = os.path.splitext(file_path)
+
+        try:
+            if ext == '.json':
+                with open(file_path, 'r') as file:
+                    results = json.load(file)[0]  # returns a dictionary
+            else:
+                print(f"Unsupported format: {ext}")
+                return None
+
+        except Exception as e:
+            print(f"Failed to load: {e}")
+            return None
+
+        # --- Extract KL best ---
+
+        # 2. Recursively go into every submodule and extract the runtimes
+        def extract_KL_best(current_node):
+            # Base case: safe guard against empty/non-dict nodes
+            if not isinstance(current_node, dict) or not current_node:
+                print("Warning: Reached an empty or non-dictionary node while searching for 'KL_best'. This path will be skipped.")
+                return None
+                
+            # 1. Check if we found it
+            if "KL_best" in current_node:
+                return current_node["KL_best"]
+                
+            # 2. Check "module" branch explicitly
+            if "module" in current_node:
+                result = extract_KL_best(current_node["module"])
+                if result is not None:
+                    return result # Found it down this path! Bubble it up.
+
+            # 3. Check "submodule" branch explicitly
+            if "submodule" in current_node:
+                result = extract_KL_best(current_node["submodule"])
+                if result is not None:
+                    return result # Found it down this path! Bubble it up.
+            
+            # Reached a dead end leaf node
+            print("Warning: 'KL_best' not found in this branch of the results tree. This path will be skipped.")
+            return None
+        
+        KL_best = extract_KL_best(results)
+
+        return KL_best[0]
     
     def get_probability_distribution(self, file_path):
         if not os.path.exists(file_path):
@@ -239,6 +292,7 @@ class DiscreteQGMDataExtractor:
             runtimes_data = self.get_runtimes(str(results_file))
             precision_data = self.get_precision(str(metrics_file))
             pmf_data = self.get_probability_distribution(str(histogram_file))
+            kl_best = self.get_KL_best(str(results_file))
 
             if config_data is None:
                 continue
@@ -273,7 +327,8 @@ class DiscreteQGMDataExtractor:
                 'circuit_depth': current_depth,
                 'precision': precision_data,
                 'pmf': pmf_data,
-                'runtimes': runtimes_data
+                'runtimes': runtimes_data,
+                'KL_best': kl_best
             }
             all_run_results.append(run_entry)
 
@@ -632,6 +687,71 @@ class VolBenchBySimulatorCategory:
         # Layout fix for the heatmap figure and then reveal it
         fig_heatmap.tight_layout()
         plt.show()  # Displays the Heatmap grid figure window
+    
+    def noisy_notnoisy_KL_divergence_comparison(self):
+        # Run compatibility check
+        self.check_for_compatible_config_groups_across_simulators()
+
+        # Extract data (Unpacking the tuple: data_list, constant_config)
+        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
+        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
+
+        # Helper function to extract and sort axes data
+        def prepare_plot_vectors(data_list):
+            # Sorting ensures the "curve" connects points in a logical order
+            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
+
+            if not sorted_data:
+                print("Warning: No data available to plot.")
+                return [], [], []
+
+            x = [d['n_qubits'] for d in sorted_data]
+            y = [d['circuit_depth'] for d in sorted_data]
+            z = [d['KL_best'] for d in sorted_data]
+            return x, y, z
+
+        # Prepare vectors for both simulators
+        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, KL_divergence for noise-free simulator
+        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, KL_divergence for noisy simulator
+
+        # Calculate KL divergence difference between the two simulators for each corresponding run (they are in the same order after sorting)
+        kl_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
+        kl_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, kl_diff)}
+
+        # Restructure dictionary into a sorted matrix DataFrame
+        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in kl_diff_per_nqubit_depth.items()]
+        df = pd.DataFrame(df_data)
+        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
+        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
+
+
+        # ==========================================
+        # Plotting both the 3D curve and the matrix heatmap side by side
+        # ==========================================
+        fig = plt.figure(figsize=(20, 8))
+
+        # Subplot 1: The Original 3D Plot
+        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
+
+        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
+        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
+
+        ax1.set_xlabel("n_qubits (X)")
+        ax1.set_ylabel("circuit_depth (Y)")
+        ax1.set_zlabel("KL Divergence (Z)")
+        ax1.set_title("KL Divergence Comparison: Noise-Free vs Noisy")
+        ax1.legend()
+
+
+        # Subplot 2: Matrix Heatmap
+        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
+
+        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
+        ax2.set_title("KL Divergence Difference Matrix")
+        ax2.set_xlabel("Number of Qubits (Columns)")
+        ax2.set_ylabel("Circuit Depth (Rows)")
+
+        plt.show()
 
 
 
@@ -659,11 +779,9 @@ aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_dat
 
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
-aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
+# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 
 
 
-def noisy_notnoisy_KL_divergence_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
-    # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the probability mass functions (PMFs) for each run.
-    pass
