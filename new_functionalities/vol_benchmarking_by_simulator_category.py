@@ -199,6 +199,8 @@ class DiscreteQGMDataExtractor:
             return None
         
         extract_module_times(results)
+
+
         return runtimes
     
     # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
@@ -277,6 +279,7 @@ class DiscreteQGMDataExtractor:
 
         if consistency_error:
             print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
+            return None
 
         # Printing results for verification
         if print_results:
@@ -289,7 +292,8 @@ class DiscreteQGMDataExtractor:
             print("Global Constant Config:", global_constant_config)
             print()
 
-        self.extract_run_data_for_config_group_was_called = True  
+        self.extract_run_data_for_config_group_was_called = True  # Set the flag to True after the first call to prevent duplicate warnings in subsequent calls
+       
         return all_run_results, global_constant_config
 
 
@@ -363,9 +367,6 @@ class VolBenchBySimulatorCategory:
         # Calculate precision difference between the two simulators for each corresponding run (they are in the same order after sorting)
         precision_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
         precision_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, precision_diff)}
-        print("Precision differences per (n_qubits, circuit_depth):")
-        for (n_qubits, circuit_depth), diff in precision_diff_per_nqubit_depth.items():
-            print(f"  ({n_qubits}, {circuit_depth}): {diff}")
 
         # Restructure dictionary into a sorted matrix DataFrame
         df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in precision_diff_per_nqubit_depth.items()]
@@ -422,7 +423,7 @@ class VolBenchBySimulatorCategory:
 
 
     # TODO: For now, the function only takes into account the run time of all modules combined. It can be easily changed to take into account the runtime per module. 
-    def noisy_notnoisy_runtime_comparison(self): 
+    def noisy_notnoisy_single_module_runtime_comparison(self, module_name=None): 
         # Run compatibility check
         self.check_for_compatible_config_groups_across_simulators()
 
@@ -430,6 +431,15 @@ class VolBenchBySimulatorCategory:
         notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
         noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
 
+        # Check if module name is provided and exists in the runtimes data
+        if module_name is None:
+            print("Error: A module name to extract the runtimes for must be provided as an argument to the function.")
+            return None 
+        elif module_name not in notnoisy_data_list[0]['runtimes']:  # Note: check_for_compatible_config_groups_across_simulators() should ensure that the module is present in both simulators, so we can just check one of them
+            print(f"Error: Module '{module_name}' not found")
+            print("Available modules are:")
+            print(list(notnoisy_data_list[0]['runtimes'].keys()))
+            return None
 
         # Helper function to extract and sort axes data
         def prepare_plot_vectors(data_list):
@@ -442,14 +452,35 @@ class VolBenchBySimulatorCategory:
 
             x = [d['n_qubits'] for d in sorted_data]
             y = [d['circuit_depth'] for d in sorted_data]
-            z = [d['runtimes']['all modules']['total_runtime'].time for d in sorted_data]
-            return x, y, z
+            z = [d['runtimes'][module_name]['total_time'].time for d in sorted_data]
+
+            # extract units and check for consistency
+            units = [d['runtimes'][module_name]['total_time'].unit for d in sorted_data]
+            if len(set(units)) > 1:
+                print(f"Error: Inconsistent time units found in the runtimes for module '{module_name}'. Units found: {set(units)}")
+                return None, None, None
+            return x, y, z, units[0]  # return the common unit as well
 
         # Prepare vectors for both simulators
-        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, runtime for noise-free simulator
-        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, runtime for noisy simulator
-    
+        x_free, y_free, z_free, unit_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, runtime for a chosen noise-free simulator module
+        x_noisy, y_noisy, z_noisy, unit_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, runtime for a chosen noisy simulator module
 
+        if unit_free != unit_noisy:
+            print(f"Error: Time units for the runtimes of module '{module_name}' do not match between the not-noisy and noisy simulators. Not-noisy unit: {unit_free}, Noisy unit: {unit_noisy}")
+            return None
+
+        # Calculate runtime difference between the two simulators for each corresponding run (they are in the same order after sorting)
+        runtime_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
+        runtime_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, runtime_diff)}
+
+        # Restructure dictionary into a sorted matrix DataFrame
+        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in runtime_diff_per_nqubit_depth.items()]
+        df = pd.DataFrame(df_data)
+        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
+        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
+
+        # TODO add matrix plot
+        
         # Initialize 3D Plot
         fig = plt.figure(figsize=(12, 8))
         ax = fig.add_subplot(111, projection='3d')
@@ -463,10 +494,14 @@ class VolBenchBySimulatorCategory:
         ax.set_xlabel('n_qubits (X)')
         ax.set_ylabel('circuit_depth (Y)')
         ax.set_zlabel('Runtime (Z)')
-        ax.set_title('Total Runtime Comparison: Noise-Free vs Noisy Simulator')
+        ax.set_title(f'{module_name} total runtime Comparison: Noise-Free vs Noisy Simulator')
         ax.legend()
 
         plt.show()
+
+    def noisy_notnoisy_runtime_comparison(self, module_name=None):
+        pass
+        # TODO: implement this function: Idea is to plot all of the DIFFERENCE runtimes for every module (pre + postprocessing time) between noisy and noise free simulators
 
 
 
@@ -477,13 +512,13 @@ base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_ru
 qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
 
 # Example of run parameters
-print("Start of examples:")
-run_data_example = qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator", print_results=True, print_constant_config=True)
-print(run_data_example)
-print()
-print("End of examples.")
-print("--------------------------------------------------")
-print()
+# print("Start of examples:")
+# run_data_example = qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator", print_results=True, print_constant_config=True)
+# print(run_data_example)
+# print()
+# print("End of examples.")
+# print("--------------------------------------------------")
+# print()
 
 
 # --- Volumetric Benchmarking Comparison ---
@@ -491,11 +526,11 @@ aer_statevector_simulator_gpu_path = r"constant_config_1\aer_statevector_simulat
 fake_sherbrooke_simulator_path = r"constant_config_1\fake_sherbrooke_simulator"
 aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
-aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_runtime_comparison()
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
 
 
 
 
-def noisy_notnoisy_pmf_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
+def noisy_notnoisy_KL_divergence_comparison(qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
     # Implement similar structure to the precision comparison function, but instead of plotting precision, we will plot the probability mass functions (PMFs) for each run.
     pass
