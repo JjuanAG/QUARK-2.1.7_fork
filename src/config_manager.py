@@ -572,21 +572,21 @@ class ConfigManagerFactorySweep:
 
 # Example usage sweep:
 
-sweep_file_test_path = r"/home/juana/QUARK-2.1.7_fork/config_files/sweep_configurations/test.yml"
+# sweep_file_test_path = r"/home/juana/QUARK-2.1.7_fork/config_files/sweep_configurations/test.yml"
 
 # 1. Use the yaml package handler to read .yml files safely
-with open(sweep_file_test_path, "r") as f:
-    sweep_benchmark_config = yaml.load(f, Loader=yaml.FullLoader)
+# with open(sweep_file_test_path, "r") as f:
+#    sweep_benchmark_config = yaml.load(f, Loader=yaml.FullLoader)
 
 # 2. Feed the configuration dictionary directly to your factory class
-factory = ConfigManagerFactorySweep()
-factory.set_sweep_config_manager(sweep_benchmark_config)
-config_manager_1 = factory.config_manager_list[1]  # For debugging: print the first generated ConfigManager's config to verify correctness
-config_manager_1.print()
+#factory = ConfigManagerFactorySweep()
+#factory.set_sweep_config_manager(sweep_benchmark_config)
+#config_manager_1 = factory.config_manager_list[1]  # For debugging: print the first generated ConfigManager's config to verify correctness
+#config_manager_1.print()
 # config_manager_1.get_config()["application"].print()  # For debugging: print the application part of the first generated config to verify correctness
 
 # Verify results 
-print(f"\nSuccessfully generated {len(factory.config_manager_list)} independent ConfigManager object instances.")
+#print(f"\nSuccessfully generated {len(factory.config_manager_list)} independent ConfigManager object instances.")
 
 
 # Example usage simple:

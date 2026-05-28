@@ -339,7 +339,8 @@ def main() -> None:
             handler_env_run(args)
 
         else:
-            handle_benchmark_run_test(args)
+            handle_benchmark_run_test(args)  # for sweep runs
+           # handle_benchmark_run(args)  # for legacy/single config runs
 
         logging.info(" ============================================================ ")
         logging.info(" ====================  QUARK finished!   ==================== ")
