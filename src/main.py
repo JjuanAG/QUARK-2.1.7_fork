@@ -176,7 +176,7 @@ def handle_benchmark_run(args: argparse.Namespace) -> None:
             installer = Installer()
             app_modules = installer.get_env(installer.get_active_env())
         
-        if args.config or args.resume_dir:
+        if args.config or args.resume_dir:  # in the case the user provided a config or wants to resume a previous run (in which case we expect a config in the resume dir)
             if not args.config:
                 args.config = os.path.join(args.resume_dir, "config.yml")
             logging.info(f"Provided config file at {args.config}")
@@ -227,6 +227,9 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
     # 1. Resolve Module Environments
     if args.modules:
         logging.info(f"Load application modules configuration from {args.modules}")
+        # Preprocesses the 'modules' configuration:
+            #   + Filters comment lines (lines starting with '#')
+            #   + Replaces relative paths by taking them relative to the location of the modules configuration file
         base_dir = os.path.dirname(args.modules)
         with open(args.modules) as filehandler:
             app_modules = _expand_paths(json.loads(
@@ -237,11 +240,11 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
         app_modules = installer.get_env(installer.get_active_env())
 
     # 2. Determine Strategy: SWEEP RUN vs SINGLE RUN
-    if args.config and args.sweep:
+    if args.config and args.sweep:  # in the case the user provided a config and explicitly indicated it's a sweep layout
         logging.info(f"Initiating Parameter Sweep Pipeline using: {args.config}")
         
-        # Safe import of your newly built Factory class
-        from config_manager import ConfigManagerFactorySweep  # Ensure this matches your package location
+        # Import the factory for sweep config management
+        from config_manager import ConfigManagerFactorySweep 
         
         # Load the .yml sweep layout configuration map
         with open(args.config, "r") as filehandler:
@@ -252,16 +255,13 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
                 raise ValueError("Sweep config file must be a valid YAML matrix layout!") from e
         
         # Generate the separate ConfigManagers via factory unpacker
-        factory = ConfigManagerFactorySweep()
-        factory.set_sweep_config_manager(sweep_benchmark_config)
-        
+        sweep_config_manager = ConfigManagerFactorySweep()
+        sweep_config_manager.set_sweep_config_manager(sweep_benchmark_config)
+
         # Run your custom sequential runner loop across all variants
-        logging.info(f"Executing {len(factory.config_manager_list)} nested configs derived from sweep...")
-        for config_manager in factory.config_manager_list:
-            benchmark_manager.orchestrate_benchmark(
-                config_manager, app_modules, store_dir=None
-            )
-            
+        logging.info(f"Executing {len(sweep_config_manager.config_manager_list)} nested configs derived from sweep...")
+        benchmark_manager.orchestrate_benchmark_sweep(sweep_config_manager, app_modules, store_dir=None)
+
         # Post-processing collection wrapper block
         comm.Barrier()
         if comm.Get_rank() == 0:
@@ -273,7 +273,7 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
         from config_manager import ConfigManager  # pylint: disable=C0415
         config_manager = ConfigManager()
 
-        if args.config or args.resume_dir:
+        if args.config or args.resume_dir:  # in the case the user provided a config or wants to resume a previous run (in which case we expect a config in the resume dir)
             if not args.config:
                 args.config = os.path.join(args.resume_dir, "config.yml")
             logging.info(f"Provided config file at {args.config}")
@@ -339,8 +339,8 @@ def main() -> None:
             handler_env_run(args)
 
         else:
-            handle_benchmark_run_test(args)  # for sweep runs
-           # handle_benchmark_run(args)  # for legacy/single config runs
+            handle_benchmark_run_test(args)  
+           # handle_benchmark_run(args)  # TODO: This is not needed anymore
 
         logging.info(" ============================================================ ")
         logging.info(" ====================  QUARK finished!   ==================== ")

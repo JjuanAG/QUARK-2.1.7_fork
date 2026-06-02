@@ -135,6 +135,36 @@ class BenchmarkManager:
         Path(self.store_dir).mkdir(parents=True, exist_ok=True)
         self._set_logger()
 
+    def _create_store_dir_sweep(self, store_dir: str = None, tag_application_name: str = None, tag_sweep_group_name: str = None, tag_backend_name: str = None, backend_grouping=False, sweep_timestamp: str = None) -> None:
+        if store_dir is None:
+            base_path = Path.cwd() / "benchmark_runs"
+        else:
+            base_path = Path(store_dir) / "benchmark_runs"
+
+        # Unique timestamp for this exact single combination configuration run
+        current_run_time = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+
+        # Fallback security check
+        if sweep_timestamp is None:
+            sweep_timestamp = current_run_time
+
+        # Folder 1: Sweep Group Layer -> "sweep_group_name-GROUP_FIRST_COMBINATION_TIME"
+        group_folder_name = f"{tag_sweep_group_name}-{sweep_timestamp}" if tag_sweep_group_name else sweep_timestamp
+        target_path = base_path / group_folder_name
+
+        # Folder 2: Backend Name Layer -> Without the timestamp
+        if backend_grouping and tag_backend_name:
+            target_path = target_path / tag_backend_name
+
+        # Folder 3: Application Layer -> "app_name-RUN_TIME"
+        app_folder_name = f"{tag_application_name}-{current_run_time}" if tag_application_name else current_run_time
+        target_path = target_path / app_folder_name
+
+        # Save and generate directories safely
+        self.store_dir = str(target_path)
+        target_path.mkdir(parents=True, exist_ok=True)
+        self._set_logger() 
+
     def _resume_store_dir(self, store_dir: str) -> None:
         """
         Resumes the existing store directory.
@@ -172,7 +202,7 @@ class BenchmarkManager:
         else:
             self._create_store_dir(store_dir, tag=benchmark_config_manager.get_config()["application"]["name"].lower())
 
-        benchmark_config_manager.save(self.store_dir)
+        benchmark_config_manager.save(self.store_dir)  # Saves the config as a YAML file.
         benchmark_config_manager.load_config(app_modules)
         self.application = benchmark_config_manager.get_app()
         benchmark_config_manager.create_tree_figure(self.store_dir)
@@ -188,13 +218,65 @@ class BenchmarkManager:
             results = self._collect_all_results()
             self._save_as_json(results)
     
-    def orchestrate_benchmark_sweep(self, sweep_benchmark_config_manager: ConfigManagerFactorySweep, app_modules: list[dict], store_dir: str = None) -> None:
+    def orchestrate_benchmark_sweep(self, sweep_config_manager: ConfigManagerFactorySweep, app_modules: list[dict], store_dir: str = None) -> None:
         """
 
         """
-        individual_config_manager_objects = sweep_benchmark_config_manager.config_manager_list
-        for config_manager in individual_config_manager_objects:
-            self.orchestrate_benchmark(config_manager, app_modules, store_dir)
+        # Track frozen timestamps specifically for each sweep group
+        group_timestamps: dict[str, str] = {}
+
+        sweep_parameters_per_combination_in_sweep_group = sweep_config_manager.sweep_parameters_per_combination_in_sweep_group
+        sweep_parameters_per_combination_in_sweep_group_iterator = [
+                                                                    (sweep_group_name, combination) 
+                                                                    for sweep_group_name, sweep_group_combinations in sweep_parameters_per_combination_in_sweep_group.items()
+                                                                    for combination in sweep_group_combinations
+                                                                ]
+        individual_config_manager_objects = sweep_config_manager.config_manager_list
+
+        total_combinations = len(sweep_parameters_per_combination_in_sweep_group_iterator)
+        logging.info(f"Total combinations across all sweep groups: {total_combinations}")
+
+        for idx, (sweep_combination_per_group, config_manager) in enumerate(zip(sweep_parameters_per_combination_in_sweep_group_iterator, individual_config_manager_objects)):
+
+            sweep_group_name = sweep_combination_per_group[0]
+            total_combinations_for_group = len(sweep_parameters_per_combination_in_sweep_group[sweep_group_name])
+
+            # TODO: Reset the idx counter whenever we switch to a new sweep group, so that the logging info is more intuitive and shows the progress within the current sweep group. This would require a bit of restructuring of the loop, maybe by grouping the combinations by sweep group first.
+            logging.info(f"Running sweep combination: {sweep_combination_per_group} of sweep group '{sweep_group_name}'")
+            logging.info(f"This is the {idx + 1}-th combination for sweep group '{sweep_group_name}' out of {total_combinations_for_group} combinations in total.")
+
+
+            # If this is the FIRST combination of this sweep group, freeze its timestamp now!
+            if sweep_group_name not in group_timestamps:
+                group_timestamps[sweep_group_name] = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+
+            # Fetch the frozen timestamp for this specific group
+            current_group_timestamp = group_timestamps[sweep_group_name]
+
+            self._create_store_dir_sweep(
+                store_dir, 
+                tag_application_name=config_manager.get_config()["application"]["name"].lower(), 
+                tag_sweep_group_name=sweep_group_name, 
+                tag_backend_name=sweep_combination_per_group[1]["backend"] if "backend" in sweep_combination_per_group[1] else None, 
+                backend_grouping=True,
+                sweep_timestamp=current_group_timestamp  # <-- Pass the group-specific frozen timestamp
+            )
+
+            config_manager.save(self.store_dir)  # Saves the config as a YAML file.
+            config_manager.load_config(app_modules)
+            self.application = config_manager.get_app()
+            config_manager.create_tree_figure(self.store_dir)
+
+            logging.info(f"Created Benchmark run directory {self.store_dir}")
+
+            benchmark_backlog = config_manager.start_create_benchmark_backlog()
+            self.run_benchmark(benchmark_backlog, config_manager.get_reps())
+
+            # Wait until all MPI processes have finished and save results on rank 0
+            comm.Barrier()
+            if comm.Get_rank() == 0:
+                results = self._collect_all_results()
+                self._save_as_json(results)
 
 
     def run_benchmark(self, benchmark_backlog: list, repetitions: int) -> None:  # pylint: disable=R0915

@@ -477,6 +477,8 @@ class ConfigManagerFactorySweep:
 
     def __init__(self):
         self.config_manager_list: list[ConfigManager] = []
+        self.sweep_parameters_per_sweep_group: dict[str, dict[str, list]] = {}  # Dictionary mapping sweep group names to their parameter-value mappings
+        self.sweep_parameters_per_combination_in_sweep_group: dict[str, list[dict[str, any]]] = {}  # Dictionary with parameter-value pairs for each combination in a sweep group
 
     @staticmethod
     def _update_param_in_tree(module_dict: dict, param_key: str, assigned_value: list) -> bool:
@@ -498,8 +500,7 @@ class ConfigManagerFactorySweep:
                     pass
         return False
 
-    @staticmethod
-    def get_single_configs_from_sweep(sweep_config: dict) -> list[dict]:
+    def get_single_configs_from_sweep(self, sweep_config: dict) -> list[dict]:
         """
         Transforms the new sweep configuration template into standalone, 
         QUARK-compliant raw data configurations.
@@ -514,7 +515,7 @@ class ConfigManagerFactorySweep:
 
         # Process each designated parameter matrix group
         for sweep_group in sweep_config.get("sweeps", []):
-            name = sweep_group.get("name", "Unnamed Sweep Group")
+            name = sweep_group.get("name", "unnamed_sweep_group")
             logging.info(f"Processing sweep group: {name}")
             print(f"Processing sweep group: {name}")  # for debugging
             
@@ -522,12 +523,20 @@ class ConfigManagerFactorySweep:
             if not params_list:
                 continue
 
-            param_keys = [p["parameter"] for p in params_list]
-            param_values = [p["values"] for p in params_list]
+            param_keys: list[str] = [p["parameter"] for p in params_list]  # list containing the parameter keys for this sweep group
+            param_values: list[list] = [p["values"] for p in params_list]  # list of lists containing the values for each parameter key, in the same order as param_keys
+
+            self.sweep_parameters_per_sweep_group[name] = {p["parameter"]: p["values"] for p in params_list}  # store the parameter-value mappings for this sweep group for later reference
+
+            if name not in self.sweep_parameters_per_combination_in_sweep_group:
+                self.sweep_parameters_per_combination_in_sweep_group[name] = []  # Initialize the list to store combinations for this sweep group
 
             # Compute the Cartesian product (calculation of every possible pairing) for parameters defined WITHIN THIS SWEEP GROUP
             for combination in itertools.product(*param_values):
-                
+
+                combination_dict = {k: v for k, v in zip(param_keys, combination)}
+                self.sweep_parameters_per_combination_in_sweep_group[name].append(combination_dict)  # Store the combination for later reference
+
                 # Deep copy ensures every combination is generated from a clean baseline tree instance
                 mutated_config = deepcopy(baseline_config)
 
