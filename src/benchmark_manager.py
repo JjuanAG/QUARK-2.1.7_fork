@@ -236,14 +236,24 @@ class BenchmarkManager:
         total_combinations = len(sweep_parameters_per_combination_in_sweep_group_iterator)
         logging.info(f"Total combinations across all sweep groups: {total_combinations}")
 
+        sweep_group_name_last = None
+        combination_counter = 0
         for idx, (sweep_combination_per_group, config_manager) in enumerate(zip(sweep_parameters_per_combination_in_sweep_group_iterator, individual_config_manager_objects)):
 
             sweep_group_name = sweep_combination_per_group[0]
             total_combinations_for_group = len(sweep_parameters_per_combination_in_sweep_group[sweep_group_name])
+            combination_counter += 1
 
-            # TODO: Reset the idx counter whenever we switch to a new sweep group, so that the logging info is more intuitive and shows the progress within the current sweep group. This would require a bit of restructuring of the loop, maybe by grouping the combinations by sweep group first.
+            if sweep_group_name_last is None:
+                sweep_group_name_last = sweep_group_name
+
+            if sweep_group_name != sweep_group_name_last and sweep_group_name_last is not None:
+                logging.info(f"Switching to new sweep group: '{sweep_group_name}'")
+                sweep_group_name_last = sweep_group_name
+                combination_counter = 0
+
             logging.info(f"Running sweep combination: {sweep_combination_per_group} of sweep group '{sweep_group_name}'")
-            logging.info(f"This is the {idx + 1}-th combination for sweep group '{sweep_group_name}' out of {total_combinations_for_group} combinations in total.")
+            logging.info(f"This is the {combination_counter}-th combination for sweep group '{sweep_group_name}' out of {total_combinations_for_group} combinations in total.")
 
 
             # If this is the FIRST combination of this sweep group, freeze its timestamp now!
