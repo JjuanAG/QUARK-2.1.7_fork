@@ -11,12 +11,12 @@ application:
     submodules:
     - config:
         depth:
-        - 2
+        - 8
       name: CircuitCardinality
       submodules:
       - config:
           backend:
-          - fake_aachen
+          - fake_sherbrooke
           n_shots:
           - 100
         name: LibraryQiskit
