@@ -17,7 +17,7 @@ baseline:
         submodules:
         - config:
             backend:
-            - fake_kolakata
+            - fake_kolkata
             n_shots:
             - 100
           name: LibraryQiskit
