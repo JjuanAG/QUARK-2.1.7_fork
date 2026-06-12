@@ -1,0 +1,106 @@
+[
+  {
+    "benchmark_backlog_item_number": 0,
+    "timestamp": "2026-06-09-10-29-15",
+    "config_hash": -6965463853136180080,
+    "total_time": 191429650.254,
+    "total_time_unit": "ms",
+    "git_revision_number": "1bc86c4157e21147f76b10a6177fc362dda1c442",
+    "git_uncommitted_changes": false,
+    "repetition": 1,
+    "total_repetitions": 1,
+    "module": {
+      "module_name": "GenerativeModeling",
+      "module_src": "src/modules/applications/qml/generative_modeling/generative_modeling.py",
+      "module_config": {
+        "n_qubits": 6
+      },
+      "total_time": 0.004,
+      "total_time_unit": "ms",
+      "preprocessing_time": 0.004,
+      "preprocessing_time_unit": "ms",
+      "postprocessing_time": 0.0,
+      "postprocessing_time_unit": "ms",
+      "quark_job_status": "FINISHED",
+      "module_level": 0,
+      "submodule": {
+        "module_name": "DiscreteData",
+        "module_src": "src/modules/applications/qml/generative_modeling/data/data_handler/discrete_data.py",
+        "module_config": {
+          "train_size": 0.3
+        },
+        "total_time": 356.35499999999996,
+        "total_time_unit": "ms",
+        "preprocessing_time": 1.013,
+        "preprocessing_time_unit": "ms",
+        "postprocessing_time": 355.342,
+        "postprocessing_time_unit": "ms",
+        "KL_best": [
+          1.7763098983577883
+        ],
+        "generalization_metrics": {
+          "fidelity": 0.18072289156626506,
+          "exploration": 0.0083,
+          "coverage": 0.35,
+          "normalized_rate": 0.002142857142857143,
+          "precision": 0.0032
+        },
+        "metrics_pandas": "benchmark_runs/fake_kolkata_depth-2026-06-05-11-06-01/generativemodeling-2026-06-09-10-29-14/benchmark_0/rep_1/data.pkl",
+        "histogram_generated": "benchmark_runs/fake_kolkata_depth-2026-06-05-11-06-01/generativemodeling-2026-06-09-10-29-14/benchmark_0/rep_1/histogram_generated.npy_1.npy",
+        "histogram_train": "benchmark_runs/fake_kolkata_depth-2026-06-05-11-06-01/generativemodeling-2026-06-09-10-29-14/benchmark_0/rep_1/histogram_train.npy_1.npy",
+        "best_parameter": "benchmark_runs/fake_kolkata_depth-2026-06-05-11-06-01/generativemodeling-2026-06-09-10-29-14/benchmark_0/rep_1/best_parameters_1.npy",
+        "module_level": 1,
+        "submodule": {
+          "module_name": "CircuitCardinality",
+          "module_src": "src/modules/applications/qml/generative_modeling/circuits/circuit_cardinality.py",
+          "module_config": {
+            "depth": 8
+          },
+          "total_time": 0.036000000000000004,
+          "total_time_unit": "ms",
+          "preprocessing_time": 0.035,
+          "preprocessing_time_unit": "ms",
+          "postprocessing_time": 0.001,
+          "postprocessing_time_unit": "ms",
+          "module_level": 2,
+          "submodule": {
+            "module_name": "LibraryQiskit",
+            "module_src": "src/modules/applications/qml/generative_modeling/mappings/library_qiskit.py",
+            "module_config": {
+              "backend": "fake_kolkata",
+              "n_shots": 100
+            },
+            "total_time": 2614.505,
+            "total_time_unit": "ms",
+            "preprocessing_time": 2614.505,
+            "preprocessing_time_unit": "ms",
+            "postprocessing_time": 0.0,
+            "postprocessing_time_unit": "ms",
+            "module_level": 3,
+            "submodule": {
+              "module_name": "QGAN",
+              "module_src": "src/modules/applications/qml/generative_modeling/training/qgan.py",
+              "module_config": {
+                "batch_size": 20,
+                "device": "cpu",
+                "epochs": 2,
+                "learning_rate_discriminator": 0.1,
+                "learning_rate_generator": 0.1,
+                "loss": "KL",
+                "pretrained": true
+              },
+              "total_time": 191426679.354,
+              "total_time_unit": "ms",
+              "preprocessing_time": 0.0,
+              "preprocessing_time_unit": "ms",
+              "postprocessing_time": 191426679.354,
+              "postprocessing_time_unit": "ms",
+              "module_level": 4,
+              "submodule": {}
+            }
+          }
+        }
+      }
+    }
+  }
+]
