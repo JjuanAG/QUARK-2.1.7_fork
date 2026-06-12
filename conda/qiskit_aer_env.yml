@@ -1,0 +1,31 @@
+name: qiskit_aer
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.11
+  - mamba
+  - uv
+  - cmake
+  - ninja
+  - gcc_linux-64
+  - gxx_linux-64
+  - openblas
+  - cuda-version=12
+  - cuda-nvcc
+  - cuda-cudart-dev
+  - libcublas-dev
+  - libcusparse-dev
+  - libcurand-dev
+  - cuda-nvrtc-dev
+  - libnvjitlink-dev
+  - cuquantum
+  - cutensornet
+  - cupy
+  - numpy
+  - scipy
+  - pip
+  - pip:
+    - scikit-build-core
+    - pybind11
+    - requests
