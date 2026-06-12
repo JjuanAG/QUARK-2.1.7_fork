@@ -780,7 +780,7 @@ aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_dat
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
-# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
+aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 
 

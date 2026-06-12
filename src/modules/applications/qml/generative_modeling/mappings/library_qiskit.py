@@ -277,6 +277,7 @@ class LibraryQiskit(LibraryGenerative):
         from qiskit_ibm_runtime.fake_provider import FakeProviderForBackendV2
         provider = FakeProviderForBackendV2()
 
+        # statevector simulators
         if config in ["aer_statevector_simulator_gpu", "aer_statevector_simulator_cpu"]:
             circuit_transpiled.remove_final_measurements()
 
@@ -287,6 +288,7 @@ class LibraryQiskit(LibraryGenerative):
                 pmfs = np.asarray([Statevector(c).probabilities() for c in all_circuits])
                 return pmfs, None
 
+        # real hardware and remote QPU
         elif config in ["ionQ_Harmony", "Amazon_SV1"]:
             import time as timetest  # pylint: disable=C0415
 
@@ -317,6 +319,7 @@ class LibraryQiskit(LibraryGenerative):
 
                 return pmfs, samples
 
+        # shot based backends (including fake backends from the IBM Quantum Platform)
         elif config in [
             "cusvaer_simulator (only available in cuQuantum appliance)",
             "aer_simulator_cpu",
