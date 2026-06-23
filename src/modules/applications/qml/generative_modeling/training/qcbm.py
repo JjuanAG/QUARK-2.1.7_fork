@@ -232,7 +232,8 @@ class QCBM(TrainingGenerative):
         execute_circuit = input_data["execute_circuit"]
         timing = self.Timing()
 
-        es = CMAEvolutionStrategy(x0.get() if GPU else x0, config['sigma'], options)
+        # es = CMAEvolutionStrategy(x0.get() if GPU else x0, config['sigma'], options)  # old line
+        es = CMAEvolutionStrategy(x0.get() if hasattr(x0, 'get') else x0, config['sigma'], options)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
 
         for parameter in ["best_parameters", "time_circuit", "time_loss", "KL", "best_sample"]:
             input_data[parameter] = []
@@ -261,7 +262,8 @@ class QCBM(TrainingGenerative):
 
             time_loss = timing.stop_recording()
 
-            es.tell(solutions, loss_epoch.get() if GPU else loss_epoch)
+            # es.tell(solutions, loss_epoch.get() if GPU else loss_epoch)  # old line
+            es.tell(solutions, loss_epoch.get() if hasattr(loss_epoch, 'get') else loss_epoch)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
 
             if es.result[1] < best_loss:
                 best_loss = es.result[1]
@@ -283,9 +285,12 @@ class QCBM(TrainingGenerative):
         self.writer.close()
 
         input_data["best_parameter"] = es.result[0]
-        best_sample = self.sample_from_pmf(best_pmf.get() if GPU else best_pmf,  # pylint: disable=E0606
-                                           n_shots=input_data["n_shots"])
-        input_data["best_sample"] = best_sample.get() if GPU else best_sample  # pylint: disable=E1101
+        # best_sample = self.sample_from_pmf(best_pmf.get() if GPU else best_pmf,  # pylint: disable=E0606
+        #                                    n_shots=input_data["n_shots"])  # old line
+        best_sample = self.sample_from_pmf(best_pmf.get() if hasattr(best_pmf, 'get') else best_pmf,  # pylint: disable=E0606
+                                           n_shots=input_data["n_shots"])  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
+        # input_data["best_sample"] = best_sample.get() if GPU else best_sample  # pylint: disable=E1101  # old line
+        input_data["best_sample"] = best_sample.get() if hasattr(best_sample, 'get') else best_sample  # new line to make it compatible with cupy and avoid in-place memory
 
         return input_data
 
@@ -306,12 +311,13 @@ class QCBM(TrainingGenerative):
         if self.study_generalization:
             if samples is None:
                 counts = self.sample_from_pmf(
-                    pmf=best_pmf.get() if GPU else best_pmf,
+                    pmf=best_pmf.get() if hasattr(best_pmf, 'get') else best_pmf,  # old line: pmf=best_pmf.get() if GPU else best_pmf
                     n_shots=self.generalization_metrics.n_shots)
             else:
                 counts = samples[int(index)]
 
-            metrics = self.generalization_metrics.get_metrics(counts if GPU else counts)
+            # metrics = self.generalization_metrics.get_metrics(counts if GPU else counts)  # old line
+            metrics = self.generalization_metrics.get_metrics(counts.get() if hasattr(counts, 'get') else counts)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
             for key, value in metrics.items():
                 self.writer.add_scalar(f"metrics/{key}", value, epoch)
 
@@ -319,18 +325,44 @@ class QCBM(TrainingGenerative):
         kl = self.kl_divergence(best_pmf.reshape([1, -1]), self.target)
         mmd = self.mmd(best_pmf.reshape([1, -1]), self.target)
 
-        self.writer.add_scalar("metrics/NLL", nll.get() if GPU else nll, epoch)
-        self.writer.add_scalar("metrics/KL", kl.get() if GPU else kl, epoch)
-        self.writer.add_scalar("metrics/MMD", mmd.get() if GPU else mmd, epoch)
+        # self.writer.add_scalar("metrics/NLL", nll.get() if GPU else nll, epoch)  # old line
+        self.writer.add_scalar("metrics/NLL", nll.get() if hasattr(nll, 'get') else nll, epoch)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
+        # self.writer.add_scalar("metrics/KL", kl.get() if GPU else kl, epoch)
+        self.writer.add_scalar("metrics/KL", kl.get() if hasattr(kl, 'get') else kl, epoch)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
+        # self.writer.add_scalar("metrics/MMD", mmd.get() if GPU else mmd, epoch)  # old line
+        self.writer.add_scalar("metrics/MMD", mmd.get() if hasattr(mmd, 'get') else mmd, epoch)  # new line to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
 
+        
+        # old code ----
+        # self.ax.clear()
+        # self.ax.imshow(
+        #     best_pmf.reshape(int(np.sqrt(best_pmf.size)), int(np.sqrt(best_pmf.size))).get()
+        #     if GPU else best_pmf.reshape(int(np.sqrt(best_pmf.size)), int(np.sqrt(best_pmf.size))),
+        #     cmap='binary',
+        #     interpolation='none'
+        # )
+        # self.ax.set_title(f'Iteration {epoch}')
+        # self.writer.add_figure('grid_figure', self.fig, global_step=epoch)
+        # old code ----
+
+        # new code to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
         self.ax.clear()
+        
+        # 1. Dynamically calculate the side length for the grid
+        side_len = int(np.sqrt(best_pmf.size))
+        reshaped_pmf = best_pmf.reshape(side_len, side_len)
+        
+        # 2. Extract to CPU only if it lives in GPU memory, avoiding flag-based crashes
+        plot_data = reshaped_pmf.get() if hasattr(reshaped_pmf, 'get') else reshaped_pmf
+        
+        # 3. Pass the safe CPU-bound matrix to matplotlib
         self.ax.imshow(
-            best_pmf.reshape(int(np.sqrt(best_pmf.size)), int(np.sqrt(best_pmf.size))).get()
-            if GPU else best_pmf.reshape(int(np.sqrt(best_pmf.size)), int(np.sqrt(best_pmf.size))),
+            plot_data,
             cmap='binary',
             interpolation='none'
         )
         self.ax.set_title(f'Iteration {epoch}')
         self.writer.add_figure('grid_figure', self.fig, global_step=epoch)
+        #
 
         return best_pmf
