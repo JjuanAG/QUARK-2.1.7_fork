@@ -101,7 +101,7 @@ class TrainingGenerative(Core, Training, ABC):
       #  return np.sum(pmf_target * np.log(pmf_target / pmf_model), axis=1)
 
     # new funciton to make it compatible with cupy and avoid in-place memory mutation errors on GPU arrays
-    def kl_divergence(self, pmf_model: np.ndarray, pmf_target: np.ndarray) -> np.ndarray:
+    def kl_divergence(self, pmf_model: np.ndarray, pmf_target: np.ndarray) -> np.ndarray:  # TODO: make it compatible for both GPU and CPU, and not only for GPU
         """
         This function calculates the Kullback-Leibler divergence, that is used as a loss function.
 

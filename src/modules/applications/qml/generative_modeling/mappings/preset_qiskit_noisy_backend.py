@@ -221,11 +221,11 @@ class PresetQiskitNoisyBackend(LibraryGenerative):
         if config == "aer_simulator_gpu":
             # backend = Aer.get_backend("aer_simulator")  # old line
             backend = AerSimulator()  # new line 
-            backend.set_options(device="GPU")
+            backend.set_options(device="GPU")  # setting to run simulate the backend on GPU
         elif config == "aer_simulator_cpu":
             # backend = Aer.get_backend("aer_simulator")  # old line
             backend = AerSimulator()  # new line
-            backend.set_options(device="CPU")
+            backend.set_options(device="CPU")  # setting to run simulate the backend on CPU
         else:
             raise NotImplementedError(f"Device Configuration {config} not implemented")
 
