@@ -1,0 +1,106 @@
+[
+  {
+    "benchmark_backlog_item_number": 0,
+    "timestamp": "2026-07-01-17-52-40",
+    "config_hash": 7552264153668699368,
+    "total_time": 1018914.407,
+    "total_time_unit": "ms",
+    "git_revision_number": "353bae773de433f12e58faac3724c77467acea4e",
+    "git_uncommitted_changes": true,
+    "repetition": 1,
+    "total_repetitions": 1,
+    "module": {
+      "module_name": "GenerativeModeling",
+      "module_src": "src/modules/applications/qml/generative_modeling/generative_modeling.py",
+      "module_config": {
+        "n_qubits": 10
+      },
+      "total_time": 0.004,
+      "total_time_unit": "ms",
+      "preprocessing_time": 0.004,
+      "preprocessing_time_unit": "ms",
+      "postprocessing_time": 0.0,
+      "postprocessing_time_unit": "ms",
+      "quark_job_status": "FINISHED",
+      "module_level": 0,
+      "submodule": {
+        "module_name": "DiscreteData",
+        "module_src": "src/modules/applications/qml/generative_modeling/data/data_handler/discrete_data.py",
+        "module_config": {
+          "train_size": 0.3
+        },
+        "total_time": 920.1669999999999,
+        "total_time_unit": "ms",
+        "preprocessing_time": 12.035,
+        "preprocessing_time_unit": "ms",
+        "postprocessing_time": 908.132,
+        "postprocessing_time_unit": "ms",
+        "KL_best": [
+          3.0133837390881357
+        ],
+        "generalization_metrics": {
+          "fidelity": 0.15463917525773196,
+          "exploration": 0.0097,
+          "coverage": 0.05555555555555555,
+          "normalized_rate": 0.002142857142857143,
+          "precision": 0.0018
+        },
+        "metrics_pandas": "benchmark_runs/generativemodeling_sweep_run_2026-07-01-17-52-30/qubit_isolated_sweep/comb_idx_2/benchmark_0/rep_1/data.pkl",
+        "histogram_generated": "benchmark_runs/generativemodeling_sweep_run_2026-07-01-17-52-30/qubit_isolated_sweep/comb_idx_2/benchmark_0/rep_1/histogram_generated.npy_1.npy",
+        "histogram_train": "benchmark_runs/generativemodeling_sweep_run_2026-07-01-17-52-30/qubit_isolated_sweep/comb_idx_2/benchmark_0/rep_1/histogram_train.npy_1.npy",
+        "best_parameter": "benchmark_runs/generativemodeling_sweep_run_2026-07-01-17-52-30/qubit_isolated_sweep/comb_idx_2/benchmark_0/rep_1/best_parameters_1.npy",
+        "module_level": 1,
+        "submodule": {
+          "module_name": "CircuitCardinality",
+          "module_src": "src/modules/applications/qml/generative_modeling/circuits/circuit_cardinality.py",
+          "module_config": {
+            "depth": 2
+          },
+          "total_time": 0.019999999999999997,
+          "total_time_unit": "ms",
+          "preprocessing_time": 0.018,
+          "preprocessing_time_unit": "ms",
+          "postprocessing_time": 0.002,
+          "postprocessing_time_unit": "ms",
+          "module_level": 2,
+          "submodule": {
+            "module_name": "LibraryQiskit",
+            "module_src": "src/modules/applications/qml/generative_modeling/mappings/library_qiskit.py",
+            "module_config": {
+              "backend": "aer_statevector_simulator_gpu",
+              "n_shots": 100
+            },
+            "total_time": 753.8629999999999,
+            "total_time_unit": "ms",
+            "preprocessing_time": 753.862,
+            "preprocessing_time_unit": "ms",
+            "postprocessing_time": 0.001,
+            "postprocessing_time_unit": "ms",
+            "module_level": 3,
+            "submodule": {
+              "module_name": "QGAN",
+              "module_src": "src/modules/applications/qml/generative_modeling/training/qgan.py",
+              "module_config": {
+                "batch_size": 20,
+                "device": "cpu",
+                "epochs": 2,
+                "learning_rate_discriminator": 0.1,
+                "learning_rate_generator": 0.1,
+                "loss": "KL",
+                "pretrained": true
+              },
+              "total_time": 1017240.353,
+              "total_time_unit": "ms",
+              "preprocessing_time": 0.0,
+              "preprocessing_time_unit": "ms",
+              "postprocessing_time": 1017240.353,
+              "postprocessing_time_unit": "ms",
+              "module_level": 4,
+              "submodule": {}
+            }
+          }
+        }
+      }
+    }
+  }
+]

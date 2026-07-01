@@ -135,35 +135,40 @@ class BenchmarkManager:
         Path(self.store_dir).mkdir(parents=True, exist_ok=True)
         self._set_logger()
 
-    def _create_store_dir_sweep(self, store_dir: str = None, tag_application_name: str = None, tag_sweep_group_name: str = None, tag_backend_name: str = None, backend_grouping=False, sweep_timestamp: str = None) -> None:
+    def _create_store_dir_sweep(
+        self, 
+        store_dir: str = None, 
+        tag_application_name: str = None, 
+        tag_sweep_group_name: str = None, 
+        tag_backend_name: str = None, 
+        backend_grouping=False, 
+        global_start_timestamp: str = None
+    ) -> None:
+        from pathlib import Path
+        
+        # Establish base tracking directory
         if store_dir is None:
             base_path = Path.cwd() / "benchmark_runs"
         else:
-            base_path = Path(store_dir) / "benchmark_runs"
+            base_path = Path(store_dir)
 
-        # Unique timestamp for this exact single combination configuration run
-        current_run_time = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+        # Layer 1: applicationname_sweep_run_TIMESTAMP
+        # Using the global timestamp shared across all cores at kickoff
+        app_prefix = f"{tag_application_name}_sweep_run" if tag_application_name else "sweep_run"
+        target_path = base_path / f"{app_prefix}_{global_start_timestamp}"
 
-        # Fallback security check
-        if sweep_timestamp is None:
-            sweep_timestamp = current_run_time
+        # Layer 2: sweep_group_name (Pure name, no timestamp!)
+        if tag_sweep_group_name:
+            target_path = target_path / tag_sweep_group_name
 
-        # Folder 1: Sweep Group Layer -> "sweep_group_name-GROUP_FIRST_COMBINATION_TIME"
-        group_folder_name = f"{tag_sweep_group_name}-{sweep_timestamp}" if tag_sweep_group_name else sweep_timestamp
-        target_path = base_path / group_folder_name
-
-        # Folder 2: Backend Name Layer -> Without the timestamp
+        # Layer 3: backend_name (Optional)
         if backend_grouping and tag_backend_name:
             target_path = target_path / tag_backend_name
 
-        # Folder 3: Application Layer -> "app_name-RUN_TIME"
-        app_folder_name = f"{tag_application_name}-{current_run_time}" if tag_application_name else current_run_time
-        target_path = target_path / app_folder_name
-
-        # Save and generate directories safely
+        # Save target string and generate directories safely
         self.store_dir = str(target_path)
         target_path.mkdir(parents=True, exist_ok=True)
-        self._set_logger() 
+        self._set_logger()
 
     def _resume_store_dir(self, store_dir: str) -> None:
         """
@@ -220,73 +225,81 @@ class BenchmarkManager:
     
     def orchestrate_benchmark_sweep(self, sweep_config_manager: ConfigManagerFactorySweep, app_modules: list[dict], store_dir: str = None) -> None:
         """
-
+        Orchestrates the benchmark sweep by distributing configurations 
+        across independent MPI worker processes.
         """
-        # Track frozen timestamps specifically for each sweep group
-        group_timestamps: dict[str, str] = {}
+        import logging
+        import os
+        from datetime import datetime
+
+        world_rank = comm.Get_rank()
+        world_size = comm.Get_size()
+
+        # --- NEW: CAPTURE OVERALL BENCHMARKING START TIMESTAMP ---
+        # Only Rank 0 looks at the system clock to establish the uniform timeline.
+        # It then broadcasts this string to all other 23 processors.
+        global_start_timestamp = None
+        if world_rank == 0:
+            global_start_timestamp = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
+        
+        # If running via real MPI, broadcast it. If local mock, this statement passes safely.
+        if hasattr(comm, 'Bcast'):
+            global_start_timestamp = comm.bcast(global_start_timestamp, root=0) if hasattr(comm, 'bcast') else global_start_timestamp
+        # ---------------------------------------------------------
 
         sweep_parameters_per_combination_in_sweep_group = sweep_config_manager.sweep_parameters_per_combination_in_sweep_group
-        sweep_parameters_per_combination_in_sweep_group_iterator = [
-                                                                    (sweep_group_name, combination) 
-                                                                    for sweep_group_name, sweep_group_combinations in sweep_parameters_per_combination_in_sweep_group.items()
-                                                                    for combination in sweep_group_combinations
-                                                                ]
+        
+        sweep_iterator = [
+            (sweep_group_name, combination) 
+            for sweep_group_name, sweep_group_combinations in sweep_parameters_per_combination_in_sweep_group.items()
+            for combination in sweep_group_combinations
+        ]
         individual_config_manager_objects = sweep_config_manager.config_manager_list
+        total_combinations = len(sweep_iterator)
 
-        total_combinations = len(sweep_parameters_per_combination_in_sweep_group_iterator)
-        logging.info(f"Total combinations across all sweep groups: {total_combinations}")
+        if world_rank == 0:
+            logging.info(f"Total combinations across all sweep groups: {total_combinations}")
+            logging.info(f"Parallel Execution active. Kickoff timestamp: {global_start_timestamp}")
 
-        sweep_group_name_last = None
-        combination_counter = 0
-        for idx, (sweep_combination_per_group, config_manager) in enumerate(zip(sweep_parameters_per_combination_in_sweep_group_iterator, individual_config_manager_objects)):
+        my_assigned_indices = list(range(world_rank, total_combinations, world_size))
+        
+        # Execute loop
+        for idx in my_assigned_indices:
+            sweep_combination_per_group = sweep_iterator[idx]
+            config_manager = individual_config_manager_objects[idx]
 
             sweep_group_name = sweep_combination_per_group[0]
-            total_combinations_for_group = len(sweep_parameters_per_combination_in_sweep_group[sweep_group_name])
-            combination_counter += 1
-
-            if sweep_group_name_last is None:
-                sweep_group_name_last = sweep_group_name
-
-            if sweep_group_name != sweep_group_name_last and sweep_group_name_last is not None:
-                logging.info(f"Switching to new sweep group: '{sweep_group_name}'")
-                sweep_group_name_last = sweep_group_name
-                combination_counter = 0
-
-            logging.info(f"Running sweep combination: {sweep_combination_per_group} of sweep group '{sweep_group_name}'")
-            logging.info(f"This is the {combination_counter}-th combination for sweep group '{sweep_group_name}' out of {total_combinations_for_group} combinations in total.")
-
-
-            # If this is the FIRST combination of this sweep group, freeze its timestamp now!
-            if sweep_group_name not in group_timestamps:
-                group_timestamps[sweep_group_name] = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
-
-            # Fetch the frozen timestamp for this specific group
-            current_group_timestamp = group_timestamps[sweep_group_name]
-
+            
+            # Call updated directory builder passing our shared execution timestamp
             self._create_store_dir_sweep(
                 store_dir, 
-                tag_application_name=config_manager.get_config()["application"]["name"].lower(), 
+                tag_application_name=config_manager.get_config()["application"]["name"].lower().replace("-", ""), 
                 tag_sweep_group_name=sweep_group_name, 
                 tag_backend_name=sweep_combination_per_group[1]["backend"] if "backend" in sweep_combination_per_group[1] else None, 
                 backend_grouping=True,
-                sweep_timestamp=current_group_timestamp  # <-- Pass the group-specific frozen timestamp
+                global_start_timestamp=global_start_timestamp  # <-- Pass the master timestamp
             )
 
-            config_manager.save(self.store_dir)  # Saves the config as a YAML file.
+            # Layer 4: Append the comb_idx_number directly onto the clean path layout
+            self.store_dir = os.path.join(self.store_dir, f"comb_idx_{idx}")
+            os.makedirs(self.store_dir, exist_ok=True)
+
+            # Process file dumps safely inside isolated sandboxes
+            config_manager.save(self.store_dir)  
             config_manager.load_config(app_modules)
             self.application = config_manager.get_app()
             config_manager.create_tree_figure(self.store_dir)
 
-            logging.info(f"Created Benchmark run directory {self.store_dir}")
-
+            # Execute single-core job logic
             benchmark_backlog = config_manager.start_create_benchmark_backlog()
             self.run_benchmark(benchmark_backlog, config_manager.get_reps())
 
-            # Wait until all MPI processes have finished and save results on rank 0
-            comm.Barrier()
-            if comm.Get_rank() == 0:
-                results = self._collect_all_results()
-                self._save_as_json(results)
+            # Save local metrics inside comb_idx_{idx} folder instantly
+            results = self._collect_all_results()
+            self._save_as_json(results)
+
+        # Sync block finish line
+        comm.Barrier()
 
 
     def run_benchmark(self, benchmark_backlog: list, repetitions: int) -> None:  # pylint: disable=R0915
@@ -401,11 +414,19 @@ class BenchmarkManager:
                          f"with {repetitions} iterations - {status_report} ==== ")
             logging.info("")
 
+            # old code ---
             # Wait until all MPI processes have finished and save results on rank 0
-            comm.Barrier()
-            if comm.Get_rank() == 0:
-                with open(f"{path}/results.json", 'w') as filehandler:
-                    json.dump([x.get() for x in benchmark_records], filehandler, indent=2, cls=NumpyEncoder)
+            # comm.Barrier()
+            # if comm.Get_rank() == 0:
+            #     with open(f"{path}/results.json", 'w') as filehandler:
+            #         json.dump([x.get() for x in benchmark_records], filehandler, indent=2, cls=NumpyEncoder)
+            # end of old code ---
+
+            # new code ---
+            # Every core saves its own results file instantly to its isolated directory!
+            with open(f"{path}/results.json", 'w') as filehandler:
+                json.dump([x.get() for x in benchmark_records], filehandler, indent=2, cls=NumpyEncoder)
+            # end of new code---
 
             logging.info("")
             logging.info(" =============== Run finished =============== ")

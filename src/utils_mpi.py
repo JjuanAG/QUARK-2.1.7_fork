@@ -107,6 +107,9 @@ def get_comm() -> any:
             def Get_rank():
                 return 0
 
+            def Get_size():
+                return 1
+
             @staticmethod
             def Bcast(loss, root):
                 pass

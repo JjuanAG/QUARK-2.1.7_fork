@@ -260,14 +260,36 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
 
         # Run your custom sequential runner loop across all variants
         logging.info(f"Executing {len(sweep_config_manager.config_manager_list)} nested configs derived from sweep...")
-        benchmark_manager.orchestrate_benchmark_sweep(sweep_config_manager, app_modules, store_dir=None)
 
-        # Post-processing collection wrapper block
-        comm.Barrier()
+        # old code ---
+        # benchmark_manager.orchestrate_benchmark_sweep(sweep_config_manager, app_modules, store_dir=None)
+
+        # # Post-processing collection wrapper block
+        # comm.Barrier()
+        # if comm.Get_rank() == 0:
+        #     results = benchmark_manager.load_results()
+        #     Plotter.visualize_results(results, benchmark_manager.store_dir)
+        # end of old code ---
+
+        # new code ---
+        # Run your custom parallel runner loop across all variants
+        logging.info(f"Executing {len(sweep_config_manager.config_manager_list)} nested configs derived from sweep...")
+        
+        # Base store directory where everything will live
+        base_output_dir = "benchmark_runs" 
+        benchmark_manager.orchestrate_benchmark_sweep(sweep_config_manager, app_modules, store_dir=base_output_dir)
+
+        # Global sync point
+        comm.Barrier() 
+        
         if comm.Get_rank() == 0:
-            results = benchmark_manager.load_results()
-            Plotter.visualize_results(results, benchmark_manager.store_dir)
+            logging.info("All parallel workers completed tasks. Commencing aggregate plotting visualization.")
+            # Note: Your Plotter must be adjusted to read ALL json files recursively inside `base_output_dir`
+            # since the files are now distributed across multiple sub-directories.
+            Plotter.visualize_results_from_root(base_output_dir)
 
+        # End of new code ---
+        
     else:
         # LEGACY/STANDARD RUN PIPELINE PATHWAY (Preserves default interactive & single config runs)
         from config_manager import ConfigManager  # pylint: disable=C0415
