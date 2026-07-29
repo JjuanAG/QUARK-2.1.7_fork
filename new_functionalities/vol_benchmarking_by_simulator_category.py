@@ -125,6 +125,66 @@ class DiscreteQGMDataExtractor:
         return probability_distribution
     
     # Note: The following function only works for the case that the user selects the discrete dataset 
+    def get_config_parameters(self, file_path: str) -> dict:
+        if not os.path.exists(file_path):
+            print(f"Error: File not found at {os.path.abspath(file_path)}")
+            return None
+
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        try:
+            if ext in ['.yml', '.yaml']:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f) or {}
+            else:
+                print(f"Unsupported format: {ext}")
+                return None
+
+        except Exception as e:
+            print(f"Failed to load: {e}")
+            return None
+
+        result = {}
+
+        def extract_module(node: dict):
+            if not isinstance(node, dict):
+                return
+
+            name = node.get("name")
+            config = node.get("config") or {}  # Handles cases where config is explicitly None/null
+
+            if name:
+                # Clean up config values (unpack single-element lists)
+                cleaned_config = {}
+                for key, val in config.items():
+                    # Unpack single-element lists
+                    if isinstance(val, list) and len(val) == 1:
+                        val = val[0]
+                    
+                    # Convert string 'False'/'True' to actual booleans if present
+                    if val == 'False':
+                        val = False
+                    elif val == 'True':
+                        val = True
+                    
+                    cleaned_config[key] = val
+
+                result[name] = cleaned_config
+
+            # Recursively process submodules
+            submodules = node.get("submodules") or []
+            for submodule in submodules:
+                extract_module(submodule)
+
+        # Start extraction from top-level application structure
+        if isinstance(data, dict) and "application" in data:
+            extract_module(data["application"])
+        else:
+            extract_module(data)
+
+        return result
+    
     def get_config_parameters(self, file_path):
         if not os.path.exists(file_path):
             print(f"Error: File not found at {os.path.abspath(file_path)}")
