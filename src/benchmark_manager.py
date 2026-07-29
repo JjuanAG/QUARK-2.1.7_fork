@@ -228,25 +228,25 @@ class BenchmarkManager:
         Orchestrates the benchmark sweep by distributing configurations 
         across independent MPI worker processes.
         """
-        import logging
-        import os
-        from datetime import datetime
 
+        # hardware configuration detector and rank identification
         world_rank = comm.Get_rank()
         world_size = comm.Get_size()
-
-        # --- NEW: CAPTURE OVERALL BENCHMARKING START TIMESTAMP ---
-        # Only Rank 0 looks at the system clock to establish the uniform timeline.
-        # It then broadcasts this string to all other 23 processors.
+        
+        # Global time synchronization for consistent directory naming across all ranks ------
+        # Only Rank 0 looks at the system clock to establish the uniform timeline. It then broadcasts this string to all other processors.
         global_start_timestamp = None
         if world_rank == 0:
             global_start_timestamp = datetime.today().strftime('%Y-%m-%d-%H-%M-%S')
         
-        # If running via real MPI, broadcast it. If local mock, this statement passes safely.
+        # If running via real MPI, broadcast this timestamp down across all processes. If running locally without MPI, this statement passes safely.
         if hasattr(comm, 'Bcast'):
             global_start_timestamp = comm.bcast(global_start_timestamp, root=0) if hasattr(comm, 'bcast') else global_start_timestamp
-        # ---------------------------------------------------------
+        # ------------------------
 
+        # Workload distribution across MPI ranks ------
+        # The sweep parameters are organized into a list of tuples, where each tuple contains the sweep group name and the corresponding combination of parameters. 
+        # Each MPI rank is assigned a subset of these combinations based on its rank and the total number of ranks.
         sweep_parameters_per_combination_in_sweep_group = sweep_config_manager.sweep_parameters_per_combination_in_sweep_group
         
         sweep_iterator = [
@@ -257,20 +257,23 @@ class BenchmarkManager:
         individual_config_manager_objects = sweep_config_manager.config_manager_list
         total_combinations = len(sweep_iterator)
 
+        # Log the total number of combinations and the kickoff timestamp only on rank 0
         if world_rank == 0:
             logging.info(f"Total combinations across all sweep groups: {total_combinations}")
             logging.info(f"Parallel Execution active. Kickoff timestamp: {global_start_timestamp}")
 
+        # Each MPI rank calculates its assigned indices based on its rank and the total number of ranks.
         my_assigned_indices = list(range(world_rank, total_combinations, world_size))
         
-        # Execute loop
+        # Each MPI rank processes its assigned combinations, creating directories and executing benchmarks accordingly. 
+        # The directory structure is organized to reflect the sweep group and backend names.
         for idx in my_assigned_indices:
             sweep_combination_per_group = sweep_iterator[idx]
             config_manager = individual_config_manager_objects[idx]
 
             sweep_group_name = sweep_combination_per_group[0]
             
-            # Call updated directory builder passing our shared execution timestamp
+            # Create the directory structure for the sweep run, including the sweep group name and backend name if applicable.
             self._create_store_dir_sweep(
                 store_dir, 
                 tag_application_name=config_manager.get_config()["application"]["name"].lower().replace("-", ""), 
@@ -280,7 +283,7 @@ class BenchmarkManager:
                 global_start_timestamp=global_start_timestamp  # <-- Pass the master timestamp
             )
 
-            # Layer 4: Append the comb_idx_number directly onto the clean path layout
+            # Create a unique subdirectory for each combination index to avoid conflicts between MPI ranks
             self.store_dir = os.path.join(self.store_dir, f"comb_idx_{idx}")
             os.makedirs(self.store_dir, exist_ok=True)
 
