@@ -258,10 +258,10 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
         sweep_config_manager = ConfigManagerFactorySweep()
         sweep_config_manager.set_sweep_config_manager(sweep_benchmark_config)
 
-        # Run your custom sequential runner loop across all variants
-        logging.info(f"Executing {len(sweep_config_manager.config_manager_list)} nested configs derived from sweep...")
-
         # old code ---
+        # Run your custom sequential runner loop across all variants
+        # logging.info(f"Executing {len(sweep_config_manager.config_manager_list)} nested configs derived from sweep...")
+        
         # benchmark_manager.orchestrate_benchmark_sweep(sweep_config_manager, app_modules, store_dir=None)
 
         # # Post-processing collection wrapper block
@@ -284,7 +284,7 @@ def handle_benchmark_run_test(args: argparse.Namespace) -> None:
         
         if comm.Get_rank() == 0:
             logging.info("All parallel workers completed tasks. Commencing aggregate plotting visualization.")
-            # Note: Your Plotter must be adjusted to read ALL json files recursively inside `base_output_dir`
+            # TODO: The Plotter must be adjusted to read ALL json files recursively inside `base_output_dir`
             # since the files are now distributed across multiple sub-directories.
             Plotter.visualize_results_from_root(base_output_dir)
 
