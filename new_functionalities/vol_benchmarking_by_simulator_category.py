@@ -19,12 +19,91 @@ class Runtime:
         return f"{self.time} {self.unit}"
     
 
-# TODO: Only works for discrete datasets, extend functionality to also work for continuous datasets (e.g., by adding an if statement that checks the dataset type and then extracts the relevant parameters accordingly)
-class DiscreteQGMDataExtractor:
+class QGMDataExtractor:
     """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
     def __init__(self, base_path):
         self.base_path = Path(base_path)
         self.extract_run_data_for_config_group_was_called = False
+
+    def get_config_parameters(self, file_path: str) -> dict:
+        """Parses a YAML configuration file to extract module parameters into a dictionary.
+
+        Recursively traverses the hierarchical 'application' structure (and its 'submodules')
+        to create a flat dictionary mapping each module's name to its configuration key-value
+        pairs.
+        Args:
+            file_path (str): The local path to the target .yml or .yaml configuration file.
+        Returns:
+            dict: A dictionary where keys are module names (e.g., 'LibraryQiskit') and
+                values are dictionaries of their parameters. Returns None if the
+                file does not exist, uses an unsupported extension, or fails to parse.
+        Example:
+            >>> config = obj.get_config_parameters("config.yml")
+            >>> print(config)
+            {
+                'GenerativeModeling': {'n_qubits': 6},
+                'LibraryQiskit': {'backend': 'aer_statevector_simulator_cpu', 'n_shots': 100}
+            }
+        """
+
+        if not os.path.exists(file_path):
+            print(f"Error: File not found at {os.path.abspath(file_path)}")
+            return None
+
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+
+        try:
+            if ext in ['.yml', '.yaml']:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f) or {}
+            else:
+                print(f"Unsupported format: {ext}")
+                return None
+
+        except Exception as e:
+            print(f"Failed to load: {e}")
+            return None
+
+        result = {}
+
+        def extract_module(node: dict):
+            if not isinstance(node, dict):
+                return
+
+            name = node.get("name")
+            config = node.get("config") or {}  # Handles cases where config is explicitly None/null
+
+            if name:
+                # Clean up config values (unpack single-element lists)
+                cleaned_config = {}
+                for key, val in config.items():
+                    # Unpack single-element lists
+                    if isinstance(val, list) and len(val) == 1:
+                        val = val[0]
+                    
+                    # Convert string 'False'/'True' to actual booleans if present
+                    if val == 'False':
+                        val = False
+                    elif val == 'True':
+                        val = True
+                    
+                    cleaned_config[key] = val
+
+                result[name] = cleaned_config
+
+            # Recursively process submodules
+            submodules = node.get("submodules") or []
+            for submodule in submodules:
+                extract_module(submodule)
+
+        # Start extraction from top-level application structure
+        if isinstance(data, dict) and "application" in data:
+            extract_module(data["application"])
+        else:
+            extract_module(data)
+
+        return result
 
     def get_precision(self, file_path):
         if not os.path.exists(file_path):
@@ -49,6 +128,7 @@ class DiscreteQGMDataExtractor:
 
         return precision
 
+    # TODO: Make this function more flexible because the loss function may not be KL and for example NNL
     def get_KL_best(self, file_path):
         """"Extracts the best KL divergence value from the results.json file of a benchmark run. Returns the best KL divergence value."""
         if not os.path.exists(file_path):
@@ -124,144 +204,6 @@ class DiscreteQGMDataExtractor:
 
         return probability_distribution
     
-    # Note: The following function only works for the case that the user selects the discrete dataset 
-    def get_config_parameters(self, file_path: str) -> dict:
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-
-        try:
-            if ext in ['.yml', '.yaml']:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f) or {}
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
-
-        result = {}
-
-        def extract_module(node: dict):
-            if not isinstance(node, dict):
-                return
-
-            name = node.get("name")
-            config = node.get("config") or {}  # Handles cases where config is explicitly None/null
-
-            if name:
-                # Clean up config values (unpack single-element lists)
-                cleaned_config = {}
-                for key, val in config.items():
-                    # Unpack single-element lists
-                    if isinstance(val, list) and len(val) == 1:
-                        val = val[0]
-                    
-                    # Convert string 'False'/'True' to actual booleans if present
-                    if val == 'False':
-                        val = False
-                    elif val == 'True':
-                        val = True
-                    
-                    cleaned_config[key] = val
-
-                result[name] = cleaned_config
-
-            # Recursively process submodules
-            submodules = node.get("submodules") or []
-            for submodule in submodules:
-                extract_module(submodule)
-
-        # Start extraction from top-level application structure
-        if isinstance(data, dict) and "application" in data:
-            extract_module(data["application"])
-        else:
-            extract_module(data)
-
-        return result
-    
-    def get_config_parameters(self, file_path):
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-
-        try:
-            if ext in ['.yml', '.yaml']:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f)
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
-
-        try:
-            application = data["application"]
-
-            # Top level
-            n_qubits = application["config"]["n_qubits"][0]
-
-            # Discrete Data
-            data_module = application["submodules"][0]
-            train_size = data_module["config"]["train_size"][0]
-
-            # CircuitCardinality
-            circuit_module = data_module["submodules"][0]
-            depth = circuit_module["config"]["depth"][0]
-
-            # LibraryQiskit
-            library_module = circuit_module["submodules"][0]
-            backend = library_module["config"]["backend"][0]
-            n_shots = library_module["config"]["n_shots"][0]
-
-            # QGAN
-            training_module = library_module["submodules"][0]
-            training_config = training_module["config"]
-
-            config_parameters = {
-                "n_qubits": n_qubits,
-                "depth": depth,
-                "data": data_module["name"].lower(),
-                "circuit": circuit_module["name"]
-                    .replace("Circuit", "")
-                    .lower(),
-                "library": library_module["name"]
-                    .replace("Library", "")
-                    .lower(),
-                "backend": backend,
-                "n_shots": n_shots,
-                "training": training_module["name"],
-                "repetitions": data.get("repetitions"),
-                "ML metrics": {
-                    "train_size": train_size,
-                    "batch_size": training_config["batch_size"][0],
-                    "device": training_config["device"][0],
-                    "epochs": training_config["epochs"][0],
-                    "learning_rate_discriminator":
-                        training_config["learning_rate_discriminator"][0],
-                    "learning_rate_generator":
-                        training_config["learning_rate_generator"][0],
-                    "loss": training_config["loss"][0],
-                    "pretrained": training_config["pretrained"][0],
-                }
-            }
-
-        except Exception as e:
-            print(f"Failed to parse config structure: {e}")
-            return None
-
-        return config_parameters
-    
     def get_runtimes(self, file_path):
         """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
 
@@ -315,9 +257,8 @@ class DiscreteQGMDataExtractor:
         extract_module_times(results)
 
         return runtimes
-    
+
     # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
-    # TODO: Note that the algorith is hard coded to go into the subfolders names "generativemodeling..." If the user changes the name of these folders, the function will not work.
     def extract_run_data_for_config_group(self, simulator_path_name, print_results=False, print_constant_config=False):
         # Setup the target path       
         target_dir = self.base_path / simulator_path_name
@@ -334,63 +275,68 @@ class DiscreteQGMDataExtractor:
         seen_combinations = {}
 
         # Iterate through all folders starting with 'generativemodeling'
-        for gen_folder in target_dir.glob("generativemodeling-*"):
+        for gen_folder in target_dir.iterdir():
+            if gen_folder.is_dir():
             
-            # Locate required files based on image_e02a1d.png structure
-            config_file = next(gen_folder.glob("config.yml"), None)
-            results_file = next(gen_folder.glob("results.json"), None)
-            # Using rglob for nested files in benchmark_0/rep_1 subfolders
-            metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
-            histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
+                # Locate required files based on image_e02a1d.png structure
+                config_file = next(gen_folder.glob("config.yml"), None)
+                results_file = next(gen_folder.glob("results.json"), None)
+                # Using rglob for nested files in benchmark_0/rep_1 subfolders
+                metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
+                histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
 
-            if not all([config_file, results_file, metrics_file, histogram_file]):
-                print(f"Skipping {gen_folder.name}: Missing one or more required files.")
-                continue
+                if not all([config_file, results_file, metrics_file, histogram_file]):
+                    print(f"Skipping {gen_folder.name}: Missing one or more required files.")
+                    continue
 
-            # --- Data extraction for each run ---
-            config_data = self.get_config_parameters(str(config_file))
-            runtimes_data = self.get_runtimes(str(results_file))
-            precision_data = self.get_precision(str(metrics_file))
-            pmf_data = self.get_probability_distribution(str(histogram_file))
-            kl_best = self.get_KL_best(str(results_file))
+                # --- Data extraction for each run ---
+                config_data = self.get_config_parameters(str(config_file))
+                runtimes_data = self.get_runtimes(str(results_file))
+                precision_data = self.get_precision(str(metrics_file))
+                pmf_data = self.get_probability_distribution(str(histogram_file))
+                kl_best = self.get_KL_best(str(results_file))
 
-            if config_data is None:
-                continue
+                if config_data is None:
+                    continue
+                else:
+                    # Flatten the config_data dictionary
+                    flat_config_data = {key: val for sub_dict in config_data.values() for key, val in sub_dict.items()}
 
-            # --- Duplicate run check ---
-            current_qubits = config_data.get('n_qubits')
-            current_depth = config_data.get('depth')
-            combination = (current_qubits, current_depth)
 
-            if combination in seen_combinations and not self.extract_run_data_for_config_group_was_called:
-                print(f"WARNING: Two runs found with the exact same number of qubits ({current_qubits}) "
-                    f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
-            else:
-                seen_combinations[combination] = gen_folder.name
+                # --- Duplicate run check ---
+                current_qubits = flat_config_data.get('n_qubits')
+                current_depth = flat_config_data.get('depth')
+                combination = (current_qubits, current_depth)
 
-            # --- CONFIG CONSISTENCY CHECK ---
-            # Extract constants (everything EXCEPT n_qubits and depth)
-            current_constants = {k: v for k, v in config_data.items() if k not in ['n_qubits', 'depth']}
-            
-            if global_constant_config is None:
-                # First folder sets the baseline for constants
-                global_constant_config = current_constants
-            else:
-                # Compare current constants to the baseline
-                if current_constants != global_constant_config:
-                    print(f"Warning: Mismatch of constant configuration parameters in folder {gen_folder.name}")
-                    consistency_error = True
+                if combination in seen_combinations and not self.extract_run_data_for_config_group_was_called:
+                    print(f"WARNING: Two runs found with the exact same number of qubits ({current_qubits}) "
+                        f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
+                else:
+                    seen_combinations[combination] = gen_folder.name
 
-            # --- RESTRUCTURE RUN DATA ---
-            run_entry = {
-                'n_qubits': current_qubits,
-                'circuit_depth': current_depth,
-                'precision': precision_data,
-                'pmf': pmf_data,
-                'runtimes': runtimes_data,
-                'KL_best': kl_best
-            }
-            all_run_results.append(run_entry)
+                # --- CONFIG CONSISTENCY CHECK ---
+                # Extract constants (everything EXCEPT n_qubits and depth)
+                current_constants = {k: v for k, v in flat_config_data.items() if k not in ['n_qubits', 'depth']}
+                
+                if global_constant_config is None:
+                    # First folder sets the baseline for constants
+                    global_constant_config = current_constants
+                else:
+                    # Compare current constants to the baseline
+                    if current_constants != global_constant_config:
+                        print(f"Warning: Mismatch of constant configuration parameters in folder {gen_folder.name}")
+                        consistency_error = True
+
+                # --- RESTRUCTURE RUN DATA ---
+                run_entry = {
+                    'n_qubits': current_qubits,
+                    'circuit_depth': current_depth,
+                    'precision': precision_data,
+                    'pmf': pmf_data,
+                    'runtimes': runtimes_data,
+                    'KL_best': kl_best
+                }
+                all_run_results.append(run_entry)
 
         if consistency_error:
             print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
@@ -422,6 +368,8 @@ class VolBenchBySimulatorCategory:
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
         noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
+        noisy_constants.pop('backend')
+        notnoisy_constants.pop('backend')
         # Extract the number of qubits and circuit depth for each run in both lists
         n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
         circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
@@ -820,7 +768,8 @@ class VolBenchBySimulatorCategory:
 # --- Example Usage Data Extractor ---
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
-qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
+base_path_gpu_cluster = Path(r"/home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted")
+qgm_data_extractor = QGMDataExtractor(base_path_gpu_cluster)
 
 # Example of run parameters
 # print("Start of examples:")
@@ -833,8 +782,10 @@ qgm_data_extractor = DiscreteQGMDataExtractor(base_path_pc)
 
 
 # --- Volumetric Benchmarking Comparison ---
-aer_statevector_simulator_gpu_path = r"constant_config_1\aer_statevector_simulator_gpu"
-fake_sherbrooke_simulator_path = r"constant_config_1\fake_sherbrooke_simulator"
+# aer_statevector_simulator_gpu_path = r"constant_config_1/aer_statevector_simulator_gpu"
+aer_statevector_simulator_gpu_path = (Path("constant_config_1") / "aer_statevector_simulator_gpu")
+# fake_sherbrooke_simulator_path = r"constant_config_1/fake_sherbrooke_simulator"
+fake_sherbrooke_simulator_path = (Path("constant_config_1") / "fake_sherbrooke_simulator")
 aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
 
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
@@ -843,5 +794,5 @@ aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_dat
 aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 
-
-
+# benchmark_runs/sorted/constant_config_1/aer_statevector_simulator_gpu
+# /home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted/constant_config_1/aer_statevector_simulator_gpu
