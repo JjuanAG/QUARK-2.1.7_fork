@@ -250,6 +250,18 @@ class PresetQiskitNoisyBackend(LibraryGenerative):
         start = perf_counter()
 
         backend = self.decompile_noisy_config(config_dict, n_qubits)
+
+        # ---------------------------------------------------------------------
+        # 1. DIAGNOSTIC PRINT STATEMENTS HERE (Setup Phase)
+        # ---------------------------------------------------------------------
+        print("\n" + "=" * 50)
+        print(f"[DEBUG] Target Config String: {config}")
+        print(f"[DEBUG] Backend Class: {type(backend).__name__}")
+        print(f"[DEBUG] Active Device Option: {backend.options.device}")
+        print(f"[DEBUG] Active Method Option: {backend.options.method}")
+        print("=" * 50 + "\n")
+        # ---------------------------------------------------------------------
+        
         logging.info(f'Backend in Use: {backend=}')
         optimization_level = self.get_transpile_routine(config_dict['transpile_optimization_level'])
         seed_transp = 42  # Remove seed if wanted
