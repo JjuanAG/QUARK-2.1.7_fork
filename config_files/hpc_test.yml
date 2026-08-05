@@ -1,0 +1,54 @@
+baseline:
+  application:
+    config:
+      n_qubits:
+      - 6
+    name: GenerativeModeling
+    submodules:
+    - config:
+        train_size:
+        - 0.7
+      name: Discrete Data
+      submodules:
+      - config:
+          depth:
+          - 2
+        name: CircuitCardinality
+        submodules:
+        - config:
+            backend:
+            - aer_simulator_gpu
+            n_shots:
+            - 10000
+            noise_configuration:
+            - fake_sherbrooke V2 127 Qubits
+            simulation_method:
+            - density_matrix
+            transpile_optimization_level:
+            - 3
+          name: PresetQiskitNoisyBackend
+          submodules:
+          - config:
+              loss:
+              - KL
+              max_evaluations:
+              - 1000
+              population_size:
+              - 100
+              pretrained:
+              - 'False'
+              sigma:
+              - 0.01
+            name: QCBM
+            submodules: []
+repetitions: 1
+
+sweeps:
+  - name: "volumetric_aer_simulator_gpu_vs_aer_simulator_cpu"
+    sweep_parameters:
+      - parameter: "backend"
+        values: ["aer_simulator_gpu", "aer_simulator_cpu"]
+      - parameter: "n_qubits"
+        values: [6, 8, 10, 12]
+      - parameter: "depth"
+        values: [2, 4, 8, 16]

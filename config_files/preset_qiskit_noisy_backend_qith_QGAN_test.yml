@@ -1,0 +1,47 @@
+application:
+  config:
+    n_qubits:
+    - 6
+  name: GenerativeModeling
+  submodules:
+  - config:
+      train_size:
+      - 0.5
+    name: Discrete Data
+    submodules:
+    - config:
+        depth:
+        - 2
+      name: CircuitCardinality
+      submodules:
+      - config:
+          backend:
+          - aer_simulator_cpu
+          n_shots:
+          - 100
+          noise_configuration:
+          - fake_kolkata V2 27 Qubits
+          simulation_method:
+          - density_matrix
+          transpile_optimization_level:
+          - 1
+        name: PresetQiskitNoisyBackend
+        submodules:
+        - config:
+            batch_size:
+            - 20
+            device:
+            - cpu
+            epochs:
+            - 2
+            learning_rate_discriminator:
+            - 0.1
+            learning_rate_generator:
+            - 0.1
+            loss:
+            - KL
+            pretrained:
+            - true
+          name: QGAN
+          submodules: []
+repetitions: 1
