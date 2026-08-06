@@ -1,0 +1,105 @@
+[
+  {
+    "benchmark_backlog_item_number": 0,
+    "timestamp": "2026-08-05-18-49-43",
+    "config_hash": 5225632362828412685,
+    "total_time": 401900.76900000003,
+    "total_time_unit": "ms",
+    "git_revision_number": "ba6c8e721a7a91a9dfcc91943ad664d14bd0c641",
+    "git_uncommitted_changes": true,
+    "repetition": 1,
+    "total_repetitions": 1,
+    "module": {
+      "module_name": "GenerativeModeling",
+      "module_src": "src/modules/applications/qml/generative_modeling/generative_modeling.py",
+      "module_config": {
+        "n_qubits": 10
+      },
+      "total_time": 0.004,
+      "total_time_unit": "ms",
+      "preprocessing_time": 0.003,
+      "preprocessing_time_unit": "ms",
+      "postprocessing_time": 0.001,
+      "postprocessing_time_unit": "ms",
+      "quark_job_status": "FINISHED",
+      "module_level": 0,
+      "submodule": {
+        "module_name": "DiscreteData",
+        "module_src": "src/modules/applications/qml/generative_modeling/data/data_handler/discrete_data.py",
+        "module_config": {
+          "train_size": 0.7
+        },
+        "total_time": 154.29999999999998,
+        "total_time_unit": "ms",
+        "preprocessing_time": 13.54,
+        "preprocessing_time_unit": "ms",
+        "postprocessing_time": 140.76,
+        "postprocessing_time_unit": "ms",
+        "KL_best": 2.203437500002252,
+        "generalization_metrics": {
+          "fidelity": 0.09410762113464816,
+          "exploration": 0.8214,
+          "coverage": 0.26587301587301587,
+          "normalized_rate": 0.25766666666666665,
+          "precision": 0.2559
+        },
+        "metrics_pandas": "benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_cpu/comb_idx_26/benchmark_0/rep_1_Cardinality_Constraint_qubits10/data.pkl",
+        "histogram_generated": "benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_cpu/comb_idx_26/benchmark_0/rep_1_Cardinality_Constraint_qubits10/histogram_generated.npy_1.npy",
+        "histogram_train": "benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_cpu/comb_idx_26/benchmark_0/rep_1_Cardinality_Constraint_qubits10/histogram_train.npy_1.npy",
+        "best_parameter": "benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_cpu/comb_idx_26/benchmark_0/rep_1_Cardinality_Constraint_qubits10/best_parameters_1.npy",
+        "module_level": 1,
+        "submodule": {
+          "module_name": "CircuitCardinality",
+          "module_src": "src/modules/applications/qml/generative_modeling/circuits/circuit_cardinality.py",
+          "module_config": {
+            "depth": 8
+          },
+          "total_time": 0.057,
+          "total_time_unit": "ms",
+          "preprocessing_time": 0.055,
+          "preprocessing_time_unit": "ms",
+          "postprocessing_time": 0.002,
+          "postprocessing_time_unit": "ms",
+          "module_level": 2,
+          "submodule": {
+            "module_name": "PresetQiskitNoisyBackend",
+            "module_src": "src/modules/applications/qml/generative_modeling/mappings/preset_qiskit_noisy_backend.py",
+            "module_config": {
+              "backend": "aer_simulator_cpu",
+              "n_shots": 10000,
+              "noise_configuration": "fake_sherbrooke V2 127 Qubits",
+              "simulation_method": "density_matrix",
+              "transpile_optimization_level": 3
+            },
+            "total_time": 7502.784000000001,
+            "total_time_unit": "ms",
+            "preprocessing_time": 7502.783,
+            "preprocessing_time_unit": "ms",
+            "postprocessing_time": 0.001,
+            "postprocessing_time_unit": "ms",
+            "module_level": 3,
+            "submodule": {
+              "module_name": "QCBM",
+              "module_src": "src/modules/applications/qml/generative_modeling/training/qcbm.py",
+              "module_config": {
+                "loss": "KL",
+                "max_evaluations": 1000,
+                "population_size": 100,
+                "pretrained": "False",
+                "sigma": 0.01
+              },
+              "total_time": 394243.624,
+              "total_time_unit": "ms",
+              "preprocessing_time": 0.0,
+              "preprocessing_time_unit": "ms",
+              "postprocessing_time": 394243.624,
+              "postprocessing_time_unit": "ms",
+              "module_level": 4,
+              "submodule": {}
+            }
+          }
+        }
+      }
+    }
+  }
+]
