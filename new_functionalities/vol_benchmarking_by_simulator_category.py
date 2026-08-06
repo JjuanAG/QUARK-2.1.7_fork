@@ -783,16 +783,21 @@ qgm_data_extractor = QGMDataExtractor(base_path_gpu_cluster)
 
 # --- Volumetric Benchmarking Comparison ---
 # aer_statevector_simulator_gpu_path = r"constant_config_1/aer_statevector_simulator_gpu"
-aer_statevector_simulator_gpu_path = (Path("constant_config_1") / "aer_statevector_simulator_gpu")
+# aer_statevector_simulator_gpu_path = (Path("constant_config_1") / "aer_statevector_simulator_gpu")
 # fake_sherbrooke_simulator_path = r"constant_config_1/fake_sherbrooke_simulator"
-fake_sherbrooke_simulator_path = (Path("constant_config_1") / "fake_sherbrooke_simulator")
-aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
+# fake_sherbrooke_simulator_path = (Path("constant_config_1") / "fake_sherbrooke_simulator")
+# aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
 
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
-aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
+# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
+# --- HPC Volumetric comparison ---
+base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30")
+aer_simulator_gpu_path = Path("aer_simulator_gpu")
+aer_simulator_cpu_path = Path("aer_simulator_cpu")
 
-# benchmark_runs/sorted/constant_config_1/aer_statevector_simulator_gpu
-# /home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted/constant_config_1/aer_statevector_simulator_gpu
+qgm_data_extractor = QGMDataExtractor(base_path_itwm)
+aer_simulator_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
+aer_simulator_comparator.noisy_notnoisy_single_module_runtime_comparison('')
