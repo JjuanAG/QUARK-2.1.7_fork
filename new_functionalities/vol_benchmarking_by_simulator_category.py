@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import math
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
+import fnmatch
 
 class Runtime:
     def __init__(self, time, unit):
@@ -18,14 +19,121 @@ class Runtime:
     def __repr__(self):
         return f"{self.time} {self.unit}"
     
+class DataFetcher:
+
+    def __init__(self, dir_path: str):
+        self.dir_path = dir_path
+
+    def load_file(self, file_path: str):
+        """Loads data from a given file path based on extension."""
+        if not os.path.exists(file_path):
+            print(f"Error: File not found at {os.path.abspath(file_path)}")
+            return None
+
+        _, ext = os.path.splitext(file_path)
+
+        try:
+            if ext == ".npy":
+                return np.load(file_path, allow_pickle=True)
+            elif ext == ".pkl":
+                with open(file_path, "rb") as f:
+                    return pickle.load(f)
+            elif ext == ".json":
+                with open(file_path, "r") as f:
+                    return json.load(f)
+            elif ext in [".yml", ".yaml"]:
+                with open(file_path, "r") as f:
+                    return yaml.safe_load(f)
+            else:
+                print(f"Unsupported format: {ext}")
+                return None
+        except Exception as e:
+            print(f"Failed to load {file_path}: {e}")
+            return None
+
+    def load_config(self, filename: str = "config.yml"):
+        """Loads non-recursively directly from top-level self.dir_path."""
+        target_path = os.path.join(self.dir_path, filename)
+        return self.load_file(target_path)
+
+    def load_nested_files(
+        self, pattern: str, ignore_surface: bool = False
+    ) -> list:
+        """Recursively traverses subdirectories to find and load files matching wildcard patterns
+
+        (e.g., 'data*.pkl', 'histogram*.npy', 'results.json').
+        """
+        results = []
+        root_abs = os.path.abspath(self.dir_path)
+
+        for current_root, _, filenames in os.walk(self.dir_path):
+            current_abs = os.path.abspath(current_root)
+
+            # Skip top-level directory if requested
+            if ignore_surface and current_abs == root_abs:
+                continue
+
+            # Load matching files using Unix wildcard matching
+            for filename in filenames:
+                if fnmatch.fnmatch(filename, pattern):
+                    full_path = os.path.join(current_root, filename)
+                    loaded_data = self.load_file(full_path)
+                    if loaded_data is not None:
+                        results.append(loaded_data)
+
+        return results
+
 
 class QGMDataExtractor:
     """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
-    def __init__(self, base_path):
-        self.base_path = Path(base_path)
+    def __init__(self, dir_path: str):
+        self.dir_path = dir_path
+        # self.data = None
         self.extract_run_data_for_config_group_was_called = False
+    
+    
+    def read_json(self, run_result_dir_path: str, module_name: str, parameter_name: str):
+        """Reads a JSON file"""
+        if self.dir_path == run_result_dir_path:
+            fetcher = DataFetcher(self.dir_path)
+        else:
+            target_dir = Path(self.dir_path) / run_result_dir_path
+            fetcher = DataFetcher(target_dir)
 
-    def get_config_parameters(self, file_path: str) -> dict:
+        data = fetcher.load_nested_files("results.json")[0]  # TODO: up until now this function can handle only one results.json file per run_result_dir_path, but it should be able to handle multiple results.json files in the future
+
+        def extract_module_params(module_name: str) -> dict | None:
+            EXCLUDE_KEYS = {"submodule", "module_name", "module_src", "module_config"}
+
+            if isinstance(data, list):
+                for item in self.data:
+                    module_parameters = extract_module_params(item, module_name)
+                    if module_parameters is not None:
+                        return module_parameters
+
+            elif isinstance(data, dict):
+                if data.get("module_name") == module_name:
+                    return {k: v for k, v in data.items() if k not in EXCLUDE_KEYS}
+
+                for key, value in data.items():
+                    if isinstance(value, (dict, list)):
+                        module_parameters = extract_module_params(value, module_name)
+                        if module_parameters is not None:
+                            return module_parameters
+
+        if "time" in parameter_name:
+            parameter_name_unit = parameter_name.replace("time", "time_unit")
+            parameter_value = extract_module_params(module_name).get(parameter_name)
+            parameter_unit = extract_module_params(module_name).get(parameter_name_unit)
+            parameter = Runtime(parameter_value, parameter_unit)
+        else:
+            parameter = extract_module_params(module_name).get(parameter_name)
+
+        return parameter
+
+    # TODO: Implement a function that goes through all the combix_idx and fetches their data. But this function should be within the Class below. This class right now, is only meant to access to data inside a single bnechmark run result!
+
+    def read_yml_config(self, file_path: str) -> dict:
         """Parses a YAML configuration file to extract module parameters into a dictionary.
 
         Recursively traverses the hierarchical 'application' structure (and its 'submodules')
@@ -45,25 +153,7 @@ class QGMDataExtractor:
                 'LibraryQiskit': {'backend': 'aer_statevector_simulator_cpu', 'n_shots': 100}
             }
         """
-
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-
-        try:
-            if ext in ['.yml', '.yaml']:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    data = yaml.safe_load(f) or {}
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
+        self._load_data(file_path)
 
         result = {}
 
@@ -98,10 +188,10 @@ class QGMDataExtractor:
                 extract_module(submodule)
 
         # Start extraction from top-level application structure
-        if isinstance(data, dict) and "application" in data:
-            extract_module(data["application"])
+        if isinstance(self.data, dict) and "application" in self.data:
+            extract_module(self.data["application"])
         else:
-            extract_module(data)
+            extract_module(self.data)
 
         return result
 
@@ -180,7 +270,7 @@ class QGMDataExtractor:
         
         KL_best = extract_KL_best(results)
 
-        return KL_best[0]
+        return KL_best
     
     def get_probability_distribution(self, file_path):
         if not os.path.exists(file_path):
@@ -285,12 +375,8 @@ class QGMDataExtractor:
                 metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
                 histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
 
-                if not all([config_file, results_file, metrics_file, histogram_file]):
-                    print(f"Skipping {gen_folder.name}: Missing one or more required files.")
-                    continue
-
                 # --- Data extraction for each run ---
-                config_data = self.get_config_parameters(str(config_file))
+                config_data = self.read_yml_config(str(config_file))
                 runtimes_data = self.get_runtimes(str(results_file))
                 precision_data = self.get_precision(str(metrics_file))
                 pmf_data = self.get_probability_distribution(str(histogram_file))
@@ -368,8 +454,8 @@ class VolBenchBySimulatorCategory:
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
         noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
-        noisy_constants.pop('backend')
-        notnoisy_constants.pop('backend')
+        # noisy_constants.pop('backend')
+        # notnoisy_constants.pop('backend')
         # Extract the number of qubits and circuit depth for each run in both lists
         n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
         circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
@@ -767,7 +853,7 @@ class VolBenchBySimulatorCategory:
 
 # --- Example Usage Data Extractor ---
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
-base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
+base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_gpu_cluster = Path(r"/home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted")
 qgm_data_extractor = QGMDataExtractor(base_path_gpu_cluster)
 
@@ -794,10 +880,12 @@ qgm_data_extractor = QGMDataExtractor(base_path_gpu_cluster)
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 # --- HPC Volumetric comparison ---
-base_path_itwm = Path(r"\\ITWM\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30")
-aer_simulator_gpu_path = Path("aer_simulator_gpu")
-aer_simulator_cpu_path = Path("aer_simulator_cpu")
+base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu")
+aer_simulator_gpu_path = "aer_simulator_gpu"
+aer_simulator_cpu_path = "aer_simulator_cpu"
 
 qgm_data_extractor = QGMDataExtractor(base_path_itwm)
 aer_simulator_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
-aer_simulator_comparator.noisy_notnoisy_single_module_runtime_comparison('')
+aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
+
+# \\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu
