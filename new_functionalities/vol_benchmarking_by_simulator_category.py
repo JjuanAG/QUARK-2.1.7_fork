@@ -90,7 +90,7 @@ class QgmRunResultsExtractor:
         self.extract_run_data_for_config_group_was_called = False
     
     
-    def get_read_json(self, module_name: str | None, parameter_name: str):
+    def get_results_json(self, module_name: str | None, parameter_name: str):
         """Reads a JSON file and extracts the parameters of a certain module or the top-level metadata.
         The extraction is recursive and handles nested submodules.
         """
@@ -157,7 +157,7 @@ class QgmRunResultsExtractor:
 
         return parameter
 
-    def get_runtimes_from_results_json(self, file_path):
+    def get_runtimes_from_results_json(self):
         """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
         loaded_files = self.fetcher.load_nested_files("results.json")
         data = loaded_files[0]  # TODO: Handle multiple results.json files if needed
@@ -359,17 +359,70 @@ class QgmRunResultsExtractor:
         return all_run_results, global_constant_config
 
 class VolBenchByBackend:
-    def __init__(self, backend1_path: str, backend2_path: str):
-        self.backend1_path = backend1_path
-        self.backend2_path = backend2_path
+    def __init__(self, backend_path: str):
+        self.backend_path = backend_path
+        self._backend_group_config_consistency_check_was_called = False  # Check for consistency of constant parameters across runs in the backend
 
-    def get_run_data_for_backend(self, backend_path: str):
-        ... # Iterate throught the runs saved under one backend and fetch a certain type of data (e.g., precision, runtimes, KL divergence, etc.) w.r.t to the number of qubits and circuit depth used for the run
-        # also, return the constant config parameters across the runs under a same backend (all but the number of qubits and circuit depth)
+    def _backend_group_config_consistency_check(self):
+
+        global_constant_config = None       
+        seen_combinations: dict[tuple, str] = {}  # dictionary containing (n_qubits, depth) as keys and the corresponding run folder name as values to detect duplicates
+        for run_results_dir in self.backend_path.iterdir():
+            if run_results_dir.is_dir():        
+                run_results_extractor = QgmRunResultsExtractor(run_results_dir)
+                config_yml = run_results_extractor.get_config_yml()  # Load config.yml for the run
+                flat_config_data = {key: val for sub_dict in config_data.values() for key, val in sub_dict.items()}
+
+                # --- Duplicate run check ---
+                current_qubits = flat_config_data.get('n_qubits')
+                current_depth = flat_config_data.get('depth')
+                combination = (current_qubits, current_depth)
+
+                if combination in seen_combinations and not self._backend_group_config_consistency_check_was_called:
+                    print(f"Error: Two runs found with the exact same number of qubits ({current_qubits}) "
+                        f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
+                    return None
+                else:    
+                    seen_combinations[combination] = run_results_dir.name  # update the seen_combinations dictionary with the current run's folder name
+
+                # --- CONFIG CONSISTENCY CHECK ---
+                # Extract constants (everything EXCEPT n_qubits and depth)
+                current_constants = {k: v for k, v in flat_config_data.items() if k not in ['n_qubits', 'depth']}
+                
+                if global_constant_config is None:
+                    # First folder sets the baseline for constants
+                    global_constant_config = current_constants
+                else:
+                    # Compare current constants to the baseline
+                    if current_constants != global_constant_config:
+                        print(f"Error: Mismatch of constant configuration parameters in folder {gen_folder.name}")
+                        return None  
         
-    def check_for_compatible_config_groups_across_backends(self):
-        ... # check if the constant configuration parameters match between the two backends and if the variable configuration parameters (n_qubits and circuit_depth) match between the two backends. If they do not match, print an error message and return False. If they do match, print a success message and return True.
+        nqubits_depth_list: list[tuple] = list(seen_combinations.keys())  # Extract the list of (n_qubits, depth) combinations for all runs in the backend
 
+        return global_constant_config, nqubits_depth_list     
+    
+    def _get_backend_group_data(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None):
+
+        global_constant_config, nqubits_depth_list = self._backend_group_config_consistency_check()
+        data_list = []
+        for run_results_dir, (n_qubits, circuit_depth) in zip(self.backend_path.iterdir(), nqubits_depth_list):
+            if run_results_dir.is_dir():
+                run_results_extractor = QgmRunResultsExtractor(run_results_dir)
+                if datafile_name == "results.json":
+                    data = run_results_extractor.get_results_json(module_name, parameter_name)  # Load results.json for the run
+                elif [".pkl", ".npy"] in datafile_name:
+                    data = run_results_extractor.get_npy_or_pkl(datafile_name)  # Load .pkl or .npy for the run
+                else:
+                    print(f"Unsupported datafile_name: {datafile_name}")
+                    return None
+                if isinstance(data, float) or  isinstance(data, Runtime):  # The data must be a number or Runtime object in order to make plots later
+                    data_list.append({
+                        "n_qubits": n_qubits,
+                        "circuit_depth": circuit_depth,
+                        "data": data
+                    })
+        
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
         noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
