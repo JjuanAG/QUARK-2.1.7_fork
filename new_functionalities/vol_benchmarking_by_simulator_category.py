@@ -56,9 +56,7 @@ class DataFetcher:
         target_path = os.path.join(self.dir_path, filename)
         return self.load_file(target_path)
 
-    def load_nested_files(
-        self, pattern: str, ignore_surface: bool = False
-    ) -> list:
+    def load_nested_files(self, pattern: str, ignore_surface: bool = False) -> list:
         """Recursively traverses subdirectories to find and load files matching wildcard patterns
 
         (e.g., 'data*.pkl', 'histogram*.npy', 'results.json').
@@ -84,56 +82,120 @@ class DataFetcher:
         return results
 
 
-class QGMDataExtractor:
+class QgmRunResultsExtractor:
     """Class to extract data from benchmark runs for volumetric benchmarking of generative quantum modeling applications."""
-    def __init__(self, dir_path: str):
-        self.dir_path = dir_path
-        # self.data = None
+    def __init__(self, run_results_dir_path: str):
+        self.run_results_dir_path = run_results_dir_path
+        self.fetcher = DataFetcher(self.run_results_dir_path)
         self.extract_run_data_for_config_group_was_called = False
     
     
-    def read_json(self, run_result_dir_path: str, module_name: str, parameter_name: str):
-        """Reads a JSON file"""
-        if self.dir_path == run_result_dir_path:
-            fetcher = DataFetcher(self.dir_path)
-        else:
-            target_dir = Path(self.dir_path) / run_result_dir_path
-            fetcher = DataFetcher(target_dir)
+    def get_read_json(self, module_name: str | None, parameter_name: str):
+        """Reads a JSON file and extracts the parameters of a certain module or the top-level metadata.
+        The extraction is recursive and handles nested submodules.
+        """
+        loaded_files = self.fetcher.load_nested_files("results.json")
+        if not loaded_files:
+            print("Error: No results.json files found.")
+            return None
 
-        data = fetcher.load_nested_files("results.json")[0]  # TODO: up until now this function can handle only one results.json file per run_result_dir_path, but it should be able to handle multiple results.json files in the future
+        data = loaded_files[0]  # TODO: Handle multiple results.json files if needed
 
-        def extract_module_params(module_name: str) -> dict | None:
+        def extract_module_params(current_data: list | dict, target_name: str | None) -> dict | None:
             EXCLUDE_KEYS = {"submodule", "module_name", "module_src", "module_config"}
 
-            if isinstance(data, list):
-                for item in self.data:
-                    module_parameters = extract_module_params(item, module_name)
-                    if module_parameters is not None:
-                        return module_parameters
+            # Handle top-level metadata extraction when module_name is None or "None"
+            if target_name is None or target_name == "None":
+                root_obj = (
+                    current_data[0]
+                    if isinstance(current_data, list) and current_data
+                    else current_data
+                )
+                if isinstance(root_obj, dict):
+                    return {k: v for k, v in root_obj.items() if k != "module"}
+                return None
 
-            elif isinstance(data, dict):
-                if data.get("module_name") == module_name:
-                    return {k: v for k, v in data.items() if k not in EXCLUDE_KEYS}
+            # Recursively search through lists
+            if isinstance(current_data, list):
+                for item in current_data:
+                    res = extract_module_params(item, target_name)
+                    if res is not None:
+                        return res
 
-                for key, value in data.items():
+            # Recursively search through dictionaries
+            elif isinstance(current_data, dict):
+                if current_data.get("module_name") == target_name:
+                    return {
+                        k: v
+                        for k, v in current_data.items()
+                        if k not in EXCLUDE_KEYS
+                    }
+
+                for value in current_data.values():
                     if isinstance(value, (dict, list)):
-                        module_parameters = extract_module_params(value, module_name)
-                        if module_parameters is not None:
-                            return module_parameters
+                        res = extract_module_params(value, target_name)
+                        if res is not None:
+                            return res
 
+            return None
+
+        # Fetch dictionary of parameters once
+        module_parameters = extract_module_params(data, module_name)
+
+        if module_parameters is None:
+            print(f"Error: Module '{module_name}' or top-level metadata not found.")
+            return None
+
+        # Retrieve requested parameter value
         if "time" in parameter_name:
             parameter_name_unit = parameter_name.replace("time", "time_unit")
-            parameter_value = extract_module_params(module_name).get(parameter_name)
-            parameter_unit = extract_module_params(module_name).get(parameter_name_unit)
+            parameter_value = module_parameters.get(parameter_name)
+            parameter_unit = module_parameters.get(parameter_name_unit)
             parameter = Runtime(parameter_value, parameter_unit)
         else:
-            parameter = extract_module_params(module_name).get(parameter_name)
+            parameter = module_parameters.get(parameter_name)
 
         return parameter
 
+    def get_runtimes_from_results_json(self, file_path):
+        """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
+        loaded_files = self.fetcher.load_nested_files("results.json")
+        data = loaded_files[0]  # TODO: Handle multiple results.json files if needed
+
+        # total run time (from all modules combined) is stored in the top-level of the results.json file, so we can extract it directly
+        runtimes = {"all_modules": {"total_time": Runtime(data.get("total_time"), data.get("total_time_unit"))}}
+
+        # recursively go into every submodule and extract the runtimes
+        def extract_module_times(current_node):
+            # Base case: if distionry is empty, return None
+            if not current_node:
+                return None
+                
+            # Check if this current layer is the one we want
+            if "module_name" in current_node:
+                runtimes.update({current_node["module_name"]: 
+                {
+                    "total_time": Runtime(current_node["total_time"], current_node["total_time_unit"]),
+                    "preprocessing_time": Runtime(current_node.get("preprocessing_time"), current_node.get("preprocessing_time_unit")),
+                    "postprocessing_time": Runtime(current_node.get("postprocessing_time"), current_node.get("postprocessing_time_unit"))
+                    }
+                     })
+                
+            # If not, check if there is a 'module' or 'submodule' layer to dive into
+            next_layer = current_node.get("module") or current_node.get("submodule")
+            if next_layer:
+                return extract_module_times(next_layer)
+
+            # In case there is no module or submodule layer, we have reached a leaf node without finding the module_name, return None    
+            return None
+        
+        extract_module_times(data)
+
+        return runtimes
+
     # TODO: Implement a function that goes through all the combix_idx and fetches their data. But this function should be within the Class below. This class right now, is only meant to access to data inside a single bnechmark run result!
 
-    def read_yml_config(self, file_path: str) -> dict:
+    def get_config_yml(self) -> dict:
         """Parses a YAML configuration file to extract module parameters into a dictionary.
 
         Recursively traverses the hierarchical 'application' structure (and its 'submodules')
@@ -146,14 +208,14 @@ class QGMDataExtractor:
                 values are dictionaries of their parameters. Returns None if the
                 file does not exist, uses an unsupported extension, or fails to parse.
         Example:
-            >>> config = obj.get_config_parameters("config.yml")
+            >>> config = obj.get_config_yml()
             >>> print(config)
             {
                 'GenerativeModeling': {'n_qubits': 6},
                 'LibraryQiskit': {'backend': 'aer_statevector_simulator_cpu', 'n_shots': 100}
             }
         """
-        self._load_data(file_path)
+        data = self.fetcher.load_file("config.yml")
 
         result = {}
 
@@ -188,165 +250,18 @@ class QGMDataExtractor:
                 extract_module(submodule)
 
         # Start extraction from top-level application structure
-        if isinstance(self.data, dict) and "application" in self.data:
-            extract_module(self.data["application"])
-        else:
-            extract_module(self.data)
+        if isinstance(data, dict) and "application" in data:
+            extract_module(data["application"])
+        else: 
+            extract_module(data)
 
         return result
-
-    def get_precision(self, file_path):
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-
-        try:
-            if ext == '.pkl':
-                with open(file_path, 'rb') as f:
-                    data = pickle.load(f)
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
-        
-        precision = data.get('precision', None) if isinstance(data, dict) else None
-
-        return precision
-
-    # TODO: Make this function more flexible because the loss function may not be KL and for example NNL
-    def get_KL_best(self, file_path):
-        """"Extracts the best KL divergence value from the results.json file of a benchmark run. Returns the best KL divergence value."""
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        root, ext = os.path.splitext(file_path)
-
-        try:
-            if ext == '.json':
-                with open(file_path, 'r') as file:
-                    results = json.load(file)[0]  # returns a dictionary
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
-
-        # --- Extract KL best ---
-
-        # 2. Recursively go into every submodule and extract the runtimes
-        def extract_KL_best(current_node):
-            # Base case: safe guard against empty/non-dict nodes
-            if not isinstance(current_node, dict) or not current_node:
-                print("Warning: Reached an empty or non-dictionary node while searching for 'KL_best'. This path will be skipped.")
-                return None
-                
-            # 1. Check if we found it
-            if "KL_best" in current_node:
-                return current_node["KL_best"]
-                
-            # 2. Check "module" branch explicitly
-            if "module" in current_node:
-                result = extract_KL_best(current_node["module"])
-                if result is not None:
-                    return result # Found it down this path! Bubble it up.
-
-            # 3. Check "submodule" branch explicitly
-            if "submodule" in current_node:
-                result = extract_KL_best(current_node["submodule"])
-                if result is not None:
-                    return result # Found it down this path! Bubble it up.
-            
-            # Reached a dead end leaf node
-            print("Warning: 'KL_best' not found in this branch of the results tree. This path will be skipped.")
-            return None
-        
-        KL_best = extract_KL_best(results)
-
-        return KL_best
     
-    def get_probability_distribution(self, file_path):
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        _, ext = os.path.splitext(file_path)
-        ext = ext.lower()
-
-        try:
-            if ext == '.npy':
-                data = np.load(file_path, allow_pickle=True)
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
+    def get_npy_or_pkl(self, file_name: str):
+        loaded_files = self.fetcher.load_file(file_name)
+        data = loaded_files[0]  # TODO: Handle multiple files if needed
         
-        probability_distribution = np.asarray(data)
-
-        return probability_distribution
-    
-    def get_runtimes(self, file_path):
-        """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
-
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
-            return None
-
-        root, ext = os.path.splitext(file_path)
-
-        try:
-            if ext == '.json':
-                with open(file_path, 'r') as file:
-                    results = json.load(file)[0]  # returns a dictionary
-            else:
-                print(f"Unsupported format: {ext}")
-                return None
-
-        except Exception as e:
-            print(f"Failed to load: {e}")
-            return None
-
-        # --- Extract run times ---
-
-        # 1. Total run time
-        runtimes = {"all_modules": {"total_time": Runtime(results.get("total_time"), results.get("total_time_unit"))}}
-
-        # 2. Recursively go into every submodule and extract the runtimes
-        def extract_module_times(current_node):
-            # Base case: if distionry is empty, return None
-            if not current_node:
-                return None
-                
-            # Check if this current layer is the one we want
-            if "module_name" in current_node:
-                runtimes.update({current_node["module_name"]: 
-                {
-                    "total_time": Runtime(current_node["total_time"], current_node["total_time_unit"]),
-                    "preprocessing_time": Runtime(current_node.get("preprocessing_time"), current_node.get("preprocessing_time_unit")),
-                    "postprocessing_time": Runtime(current_node.get("postprocessing_time"), current_node.get("postprocessing_time_unit"))
-                    }
-                     })
-                
-            # If not, check if there is a 'module' or 'submodule' layer to dive into
-            next_layer = current_node.get("module") or current_node.get("submodule")
-            if next_layer:
-                return extract_module_times(next_layer)
-
-            # In case there is no module or submodule layer, we have reached a leaf node without finding the module_name, return None    
-            return None
-        
-        extract_module_times(results)
-
-        return runtimes
+        ... # TODO: Implement logic to extract and return the desired data from the loaded .npy or .pkl file
 
     # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
     def extract_run_data_for_config_group(self, simulator_path_name, print_results=False, print_constant_config=False):
@@ -376,8 +291,8 @@ class QGMDataExtractor:
                 histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
 
                 # --- Data extraction for each run ---
-                config_data = self.read_yml_config(str(config_file))
-                runtimes_data = self.get_runtimes(str(results_file))
+                config_data = self.get_config_yml(str(config_file))
+                runtimes_data = self.get_runtimes_from_results_json(str(results_file))
                 precision_data = self.get_precision(str(metrics_file))
                 pmf_data = self.get_probability_distribution(str(histogram_file))
                 kl_best = self.get_KL_best(str(results_file))
@@ -443,13 +358,17 @@ class QGMDataExtractor:
        
         return all_run_results, global_constant_config
 
+class VolBenchByBackend:
+    def __init__(self, backend1_path: str, backend2_path: str):
+        self.backend1_path = backend1_path
+        self.backend2_path = backend2_path
 
-class VolBenchBySimulatorCategory:
-    """Class to perform volumetric benchmarking comparisons between different simulator categories (e.g., noisy vs noise-free)."""
-    def __init__(self, qgm_data_object, notnoisy_simulator_path, noisy_simulator_path):
-        self.qgm_data_object = qgm_data_object
-        self.notnoisy_simulator_path = notnoisy_simulator_path
-        self.noisy_simulator_path = noisy_simulator_path
+    def get_run_data_for_backend(self, backend_path: str):
+        ... # Iterate throught the runs saved under one backend and fetch a certain type of data (e.g., precision, runtimes, KL divergence, etc.) w.r.t to the number of qubits and circuit depth used for the run
+        # also, return the constant config parameters across the runs under a same backend (all but the number of qubits and circuit depth)
+        
+    def check_for_compatible_config_groups_across_backends(self):
+        ... # check if the constant configuration parameters match between the two backends and if the variable configuration parameters (n_qubits and circuit_depth) match between the two backends. If they do not match, print an error message and return False. If they do match, print a success message and return True.
 
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
@@ -855,7 +774,7 @@ class VolBenchBySimulatorCategory:
 base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
 base_path_gpu_cluster = Path(r"/home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted")
-qgm_data_extractor = QGMDataExtractor(base_path_gpu_cluster)
+qgm_data_extractor = QgmRunResultsExtractor(base_path_gpu_cluster)
 
 # Example of run parameters
 # print("Start of examples:")
@@ -884,7 +803,7 @@ base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_ru
 aer_simulator_gpu_path = "aer_simulator_gpu"
 aer_simulator_cpu_path = "aer_simulator_cpu"
 
-qgm_data_extractor = QGMDataExtractor(base_path_itwm)
+qgm_data_extractor = QgmRunResultsExtractor(base_path_itwm)
 aer_simulator_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
 aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
 
