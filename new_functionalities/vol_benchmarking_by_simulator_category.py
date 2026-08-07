@@ -26,35 +26,36 @@ class DataFetcher:
 
     def load_file(self, file_path: str):
         """Loads data from a given file path based on extension."""
-        if not os.path.exists(file_path):
-            print(f"Error: File not found at {os.path.abspath(file_path)}")
+        target_path = os.path.join(self.dir_path, file_path)
+
+        if not os.path.exists(target_path):
+            print(f"Error: File not found at {os.path.abspath(target_path)}")
             return None
 
-        _, ext = os.path.splitext(file_path)
+        _, ext = os.path.splitext(target_path)
 
         try:
             if ext == ".npy":
-                return np.load(file_path, allow_pickle=True)
+                return np.load(target_path, allow_pickle=True)
             elif ext == ".pkl":
-                with open(file_path, "rb") as f:
+                with open(target_path, "rb") as f:
                     return pickle.load(f)
             elif ext == ".json":
-                with open(file_path, "r") as f:
+                with open(target_path, "r") as f:
                     return json.load(f)
             elif ext in [".yml", ".yaml"]:
-                with open(file_path, "r") as f:
+                with open(target_path, "r") as f:
                     return yaml.safe_load(f)
             else:
                 print(f"Unsupported format: {ext}")
                 return None
         except Exception as e:
-            print(f"Failed to load {file_path}: {e}")
+            print(f"Failed to load {target_path}: {e}")
             return None
 
     def load_config(self, filename: str = "config.yml"):
         """Loads non-recursively directly from top-level self.dir_path."""
-        target_path = os.path.join(self.dir_path, filename)
-        return self.load_file(target_path)
+        return self.load_file(filename)
 
     def load_nested_files(self, pattern: str, ignore_surface: bool = False) -> list:
         """Recursively traverses subdirectories to find and load files matching wildcard patterns
@@ -90,16 +91,19 @@ class QgmRunResultsExtractor:
         self.extract_run_data_for_config_group_was_called = False
     
     
-    def get_results_json(self, module_name: str | None, parameter_name: str):
-        """Reads a JSON file and extracts the parameters of a certain module or the top-level metadata.
-        The extraction is recursive and handles nested submodules.
+    def get_results_json(self, module_name: str | None, parameter_name: str, nested_parameter: str | None = None):
+        """Reads a JSON file and extracts the parameters of a certain module or top-level metadata.
+
+        The extraction is recursive and handles nested submodules and nested
+        dictionaries.
         """
-        loaded_files = self.fetcher.load_nested_files("results.json")
+        loaded_files = self.fetcher.load_nested_files("results.json")  # returns a list of loaded JSON data, which is in turn a list of dictionaries
+
         if not loaded_files:
             print("Error: No results.json files found.")
             return None
 
-        data = loaded_files[0]  # TODO: Handle multiple results.json files if needed
+        data = loaded_files[0][0]  # TODO: Handle multiple results.json files if needed
 
         def extract_module_params(current_data: list | dict, target_name: str | None) -> dict | None:
             EXCLUDE_KEYS = {"submodule", "module_name", "module_src", "module_config"}
@@ -143,24 +147,37 @@ class QgmRunResultsExtractor:
         module_parameters = extract_module_params(data, module_name)
 
         if module_parameters is None:
-            print(f"Error: Module '{module_name}' or top-level metadata not found.")
+            print(
+                f"Error: Module '{module_name}' or top-level metadata not found."
+            )
             return None
 
-        # Retrieve requested parameter value
-        if "time" in parameter_name:
+        # Handle Runtime objects for time parameters
+        if "time" in parameter_name and nested_parameter is None:
             parameter_name_unit = parameter_name.replace("time", "time_unit")
             parameter_value = module_parameters.get(parameter_name)
             parameter_unit = module_parameters.get(parameter_name_unit)
-            parameter = Runtime(parameter_value, parameter_unit)
-        else:
-            parameter = module_parameters.get(parameter_name)
+            return Runtime(parameter_value, parameter_unit)
 
-        return parameter
+        # Fetch top-level parameter value
+        parameter_value = module_parameters.get(parameter_name)
+
+        # If user specifies a nested parameter, drill down into the dictionary
+        if nested_parameter is not None:
+            if isinstance(parameter_value, dict):
+                return parameter_value.get(nested_parameter)
+            else:
+                print(
+                    f"Warning: '{parameter_name}' is not a dictionary. Cannot fetch '{nested_parameter}'."
+                )
+                return None
+
+        return parameter_value
 
     def get_runtimes_from_results_json(self):
         """Extracts runtimes from the results.json file of a benchmark run. Returns a dictionary with the runtimes for each module and submodule, as well as the overall runtime."""
         loaded_files = self.fetcher.load_nested_files("results.json")
-        data = loaded_files[0]  # TODO: Handle multiple results.json files if needed
+        data = loaded_files[0][0]  # TODO: Handle multiple results.json files if needed
 
         # total run time (from all modules combined) is stored in the top-level of the results.json file, so we can extract it directly
         runtimes = {"all_modules": {"total_time": Runtime(data.get("total_time"), data.get("total_time_unit"))}}
@@ -364,14 +381,14 @@ class VolBenchByBackend:
         self._backend_group_config_consistency_check_was_called = False  # Check for consistency of constant parameters across runs in the backend
 
     def _backend_group_config_consistency_check(self):
-
-        global_constant_config = None       
+        """Checks for consistency of constant parameters across all runs in the backend directory."""
+        global_constant_config = None
         seen_combinations: dict[tuple, str] = {}  # dictionary containing (n_qubits, depth) as keys and the corresponding run folder name as values to detect duplicates
         for run_results_dir in self.backend_path.iterdir():
             if run_results_dir.is_dir():        
                 run_results_extractor = QgmRunResultsExtractor(run_results_dir)
                 config_yml = run_results_extractor.get_config_yml()  # Load config.yml for the run
-                flat_config_data = {key: val for sub_dict in config_data.values() for key, val in sub_dict.items()}
+                flat_config_data = {key: val for sub_dict in config_yml.values() for key, val in sub_dict.items()}
 
                 # --- Duplicate run check ---
                 current_qubits = flat_config_data.get('n_qubits')
@@ -380,7 +397,7 @@ class VolBenchByBackend:
 
                 if combination in seen_combinations and not self._backend_group_config_consistency_check_was_called:
                     print(f"Error: Two runs found with the exact same number of qubits ({current_qubits}) "
-                        f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
+                        f"and circuit depth ({current_depth}) in parent folder {self.backend_path.name}. First found in: {seen_combinations[combination]}, duplicate found in: {run_results_dir.name}")
                     return None
                 else:    
                     seen_combinations[combination] = run_results_dir.name  # update the seen_combinations dictionary with the current run's folder name
@@ -395,14 +412,14 @@ class VolBenchByBackend:
                 else:
                     # Compare current constants to the baseline
                     if current_constants != global_constant_config:
-                        print(f"Error: Mismatch of constant configuration parameters in folder {gen_folder.name}")
+                        print(f"Error: Mismatch of constant configuration parameters in folder {run_results_dir.name}")
                         return None  
         
         nqubits_depth_list: list[tuple] = list(seen_combinations.keys())  # Extract the list of (n_qubits, depth) combinations for all runs in the backend
 
         return global_constant_config, nqubits_depth_list     
     
-    def _get_backend_group_data(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None):
+    def _get_backend_group_data(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
 
         global_constant_config, nqubits_depth_list = self._backend_group_config_consistency_check()
         data_list = []
@@ -410,7 +427,7 @@ class VolBenchByBackend:
             if run_results_dir.is_dir():
                 run_results_extractor = QgmRunResultsExtractor(run_results_dir)
                 if datafile_name == "results.json":
-                    data = run_results_extractor.get_results_json(module_name, parameter_name)  # Load results.json for the run
+                    data = run_results_extractor.get_results_json(module_name, parameter_name, nested_parameter)  # Load results.json for the run
                 elif [".pkl", ".npy"] in datafile_name:
                     data = run_results_extractor.get_npy_or_pkl(datafile_name)  # Load .pkl or .npy for the run
                 else:
@@ -422,7 +439,8 @@ class VolBenchByBackend:
                         "circuit_depth": circuit_depth,
                         "data": data
                     })
-        
+        return global_constant_config, data_list
+
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
         noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
@@ -856,8 +874,19 @@ base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_ru
 aer_simulator_gpu_path = "aer_simulator_gpu"
 aer_simulator_cpu_path = "aer_simulator_cpu"
 
-qgm_data_extractor = QgmRunResultsExtractor(base_path_itwm)
-aer_simulator_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
-aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
+run_results_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu\comb_idx_19")
+test_data_extractor = QgmRunResultsExtractor(run_results_directory)
+config = test_data_extractor.get_config_yml()
+results_json = test_data_extractor.get_results_json(module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
+results_times = test_data_extractor.get_runtimes_from_results_json()
+
+backend_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu")
+vol_bench_aer_simulator_cpu = VolBenchByBackend(backend_directory)
+global_config, nqubits_depth_list = vol_bench_aer_simulator_cpu._backend_group_config_consistency_check()
+_, data_list = vol_bench_aer_simulator_cpu._get_backend_group_data(datafile_name="results.json", module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
+
+
+# aer_simulator_comparator = VolBenchBySimulatorCategory(test_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
+# aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
 
 # \\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu
