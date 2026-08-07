@@ -10,6 +10,7 @@ import math
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import fnmatch
+from collections import Counter
 
 class Runtime:
     def __init__(self, time, unit):
@@ -375,7 +376,7 @@ class QgmRunResultsExtractor:
        
         return all_run_results, global_constant_config
 
-class VolBenchByBackend:
+class VolBenchBackend:
     def __init__(self, backend_path: str):
         self.backend_path = backend_path
         self._backend_group_config_consistency_check_was_called = False  # Check for consistency of constant parameters across runs in the backend
@@ -440,6 +441,7 @@ class VolBenchByBackend:
                         "data": data
                     })
         return global_constant_config, data_list
+    
 
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
@@ -838,7 +840,55 @@ class VolBenchByBackend:
         plt.show()
 
 
+class VolBenchBackendPair():
+    def __init__(self, backend_path_1: str, backend_path_2: str):
+        self.vol_backend_1 = VolBenchBackend(backend_path_1)
+        self.vol_backend_2 = VolBenchBackend(backend_path_2)
+        self._backend_group_config_consistency_check_was_called = False  # Check for consistency of constant parameters across runs in the backend
 
+    def _check_consistency_across_backends(self):
+        global_config_1, nqubits_depth_list_1 = self.vol_backend_1._backend_group_config_consistency_check()
+        global_config_2, nqubits_depth_list_2 = self.vol_backend_2._backend_group_config_consistency_check()
+        
+        ignored_key = "backend"  # TODO: This might not necessarily be only "backend"
+        global_config_1_filtered = {k: v for k, v in global_config_1.items() if k != ignored_key}
+        global_config_2_filtered = {k: v for k, v in global_config_2.items() if k != ignored_key}
+
+        if global_config_1_filtered != global_config_2_filtered:
+            raise ValueError(
+                    "Constant configuration parameters mismatch between backends.\n"
+                    f"Backend 1 constants: {global_config_1}\n"
+                    f"Backend 2 constants: {global_config_2}"
+                )
+        if Counter(nqubits_depth_list_1) != Counter(nqubits_depth_list_2):
+            raise ValueError(
+                "Mismatch in run (n_qubits, circuit_depth) configurations or run counts between backends.\n"
+                f"Backend 1 ({len(nqubits_depth_list_1)} runs): {nqubits_depth_list_1}\n"
+                f"Backend 2 ({len(nqubits_depth_list_2)} runs): {nqubits_depth_list_2}"
+            )
+        
+        return True
+    
+    def _backend_pair_data_extraction(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
+        # Check for consistency across backends
+        self._check_consistency_across_backends()
+
+        # Extract data from both backends
+        global_config_1, data_list_1 = self.vol_backend_1._get_backend_group_data(datafile_name, module_name, parameter_name, nested_parameter)
+        global_config_2, data_list_2 = self.vol_backend_2._get_backend_group_data(datafile_name, module_name, parameter_name, nested_parameter)
+
+        return (global_config_1, data_list_1), (global_config_2, data_list_2)
+    
+    def backend_pair_single_parameter_comparison(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
+        # Extract data from both backends
+        (global_config_1, data_list_1), (global_config_2, data_list_2) = self._backend_pair_data_extraction(datafile_name, module_name, parameter_name, nested_parameter)
+
+        # TODO: Implement the plotting as done before
+
+        
+
+        return (global_config_1, data_list_1), (global_config_2, data_list_2)
+    
 
 
 # --- Example Usage Data Extractor ---
@@ -880,11 +930,17 @@ config = test_data_extractor.get_config_yml()
 results_json = test_data_extractor.get_results_json(module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
 results_times = test_data_extractor.get_runtimes_from_results_json()
 
-backend_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu")
-vol_bench_aer_simulator_cpu = VolBenchByBackend(backend_directory)
+aer_simulator_cpu_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu")
+vol_bench_aer_simulator_cpu = VolBenchBackend(aer_simulator_cpu_directory)
+aer_simulator_gpu_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu")
+vol_bench_aer_simulator_gpu = VolBenchBackend(aer_simulator_gpu_directory)
+
 global_config, nqubits_depth_list = vol_bench_aer_simulator_cpu._backend_group_config_consistency_check()
 _, data_list = vol_bench_aer_simulator_cpu._get_backend_group_data(datafile_name="results.json", module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
 
+vol_bench_pair = VolBenchBackendPair(aer_simulator_cpu_directory, aer_simulator_gpu_directory)
+bool = vol_bench_pair._check_consistency_across_backends()
+print("Consistency check across backends result:", bool)
 
 # aer_simulator_comparator = VolBenchBySimulatorCategory(test_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
 # aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
