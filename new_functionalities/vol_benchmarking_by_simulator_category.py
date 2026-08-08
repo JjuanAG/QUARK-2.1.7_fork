@@ -16,9 +16,27 @@ class Runtime:
     def __init__(self, time, unit):
         self.time = time
         self.unit = unit
-    
+
     def __repr__(self):
         return f"{self.time} {self.unit}"
+
+    def __add__(self, other):
+        if not isinstance(other, Runtime):
+            return NotImplemented
+        if self.unit != other.unit:
+            raise ValueError(
+                f"Cannot add Runtime objects with different units: '{self.unit}' and '{other.unit}'"
+            )
+        return Runtime(self.time + other.time, self.unit)
+
+    def __sub__(self, other):
+        if not isinstance(other, Runtime):
+            return NotImplemented
+        if self.unit != other.unit:
+            raise ValueError(
+                f"Cannot subtract Runtime objects with different units: '{self.unit}' and '{other.unit}'"
+            )
+        return Runtime(self.time - other.time, self.unit)
     
 class DataFetcher:
 
@@ -435,13 +453,17 @@ class VolBenchBackend:
                     print(f"Unsupported datafile_name: {datafile_name}")
                     return None
                 if isinstance(data, float) or  isinstance(data, Runtime):  # The data must be a number or Runtime object in order to make plots later
+                    if nested_parameter is None:
+                        data_name = parameter_name
+                    else:
+                        data_name = nested_parameter
                     data_list.append({
                         "n_qubits": n_qubits,
                         "circuit_depth": circuit_depth,
-                        "data": data
+                        "data": data,
+                        data_name: data
                     })
         return global_constant_config, data_list
-    
 
     def check_for_compatible_config_groups_across_simulators(self):
         notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
@@ -879,15 +901,70 @@ class VolBenchBackendPair():
 
         return (global_config_1, data_list_1), (global_config_2, data_list_2)
     
-    def backend_pair_single_parameter_comparison(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
+    def backend_pair_single_parameter_vol_bench(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
         # Extract data from both backends
         (global_config_1, data_list_1), (global_config_2, data_list_2) = self._backend_pair_data_extraction(datafile_name, module_name, parameter_name, nested_parameter)
 
-        # TODO: Implement the plotting as done before
+        backend_name_1 = global_config_1.get("backend", "Backend 1")
+        backend_name_2 = global_config_2.get("backend", "Backend 2")
+        if nested_parameter is None:
+            data_name = parameter_name
+        else:
+            data_name = nested_parameter
 
-        
+        def prep_plot_vectors(data_list):
+            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))  # sort by n_qubits and circuit_depth to ensure the "curve" connects points in a logical order
+            x = [d['n_qubits'] for d in sorted_data]
+            y = [d['circuit_depth'] for d in sorted_data]
+            z = [d[data_name] for d in sorted_data]
+            if isinstance(z[0], Runtime):
+                z = [d[data_name].time for d in sorted_data]  # Extract the time value from the Runtime object
+                z_units = [d[data_name].unit for d in sorted_data]  # Extract the unit from the Runtime object
+            return x, y, z, z_units[0] if isinstance(z[0], Runtime) else None  # Return the common unit if it's a Runtime object
 
-        return (global_config_1, data_list_1), (global_config_2, data_list_2)
+        x1, y1, z1, z1_units = prep_plot_vectors(data_list_1)
+        x2, y2, z2, z2_units = prep_plot_vectors(data_list_2)
+
+        # calculate parameter difference between the two backends for each corresponding run
+        # Relative Percentage Change (Capped at 100%): Normalizes the difference against the maximum of the two values so that the scale stays strictly bounded inside [0, 100]%:
+        param_diff = [
+            ((z1_val - z2_val) / max(z1_val, z2_val) * 100) if max(z1_val, z2_val) > 0 else 0.0
+            for z1_val, z2_val in zip(z1, z2)
+        ]
+        # Map to (n_qubits, circuit_depth)
+        param_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x1, y1, param_diff)}
+
+        # Restructure dictionary into a sorted matrix DataFrame
+        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in param_diff_per_nqubit_depth.items()]
+        df = pd.DataFrame(df_data)
+        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")
+        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)
+
+        # Plotting both the 3D curve and the matrix heatmap side by side
+        fig = plt.figure(figsize=(20, 8))
+
+        # Subplot 1: The Original 3D Plot
+        ax1 = fig.add_subplot(121, projection="3d")
+        ax1.plot(x1, y1, z1, label=backend_name_1, marker="o", linewidth=2, color="blue")
+        ax1.plot(x2, y2, z2, label=backend_name_2, marker="x", linestyle="--", linewidth=2, color="orange")
+        ax1.set_xlabel("n_qubits")
+        ax1.set_ylabel("circuit_depth")
+        if z1_units is not None and z2_units is not None and z1_units == z2_units:
+            ax1.set_zlabel(f"{data_name} ({z1_units})")
+        else:
+            ax1.set_zlabel(f"{data_name} (arb. units)")
+        ax1.set_title(f"{data_name} volumetric comparison: {backend_name_1} vs {backend_name_2}")
+        ax1.legend()
+
+        # Subplot 2: Matrix Heatmap
+        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
+
+        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="PuOr", center=0, ax=ax2)  #  coolwarm
+        ax2.set_title(f"{data_name} Difference Matrix (Backend 1 - Backend 2) in %")
+        ax2.set_xlabel("Number of Qubits (Columns)")
+        ax2.set_ylabel("Circuit Depth (Rows)")
+
+        plt.show()
     
 
 
@@ -920,27 +997,32 @@ qgm_data_extractor = QgmRunResultsExtractor(base_path_gpu_cluster)
 # aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 # --- HPC Volumetric comparison ---
-base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu")
-aer_simulator_gpu_path = "aer_simulator_gpu"
-aer_simulator_cpu_path = "aer_simulator_cpu"
+# base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu")
+# aer_simulator_gpu_path = "aer_simulator_gpu"
+# aer_simulator_cpu_path = "aer_simulator_cpu"
 
-run_results_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu\comb_idx_19")
-test_data_extractor = QgmRunResultsExtractor(run_results_directory)
-config = test_data_extractor.get_config_yml()
-results_json = test_data_extractor.get_results_json(module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
-results_times = test_data_extractor.get_runtimes_from_results_json()
+# run_results_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu\comb_idx_19")
+# test_data_extractor = QgmRunResultsExtractor(run_results_directory)
+# config = test_data_extractor.get_config_yml()
+# results_json = test_data_extractor.get_results_json(module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
+# results_times = test_data_extractor.get_runtimes_from_results_json()
 
-aer_simulator_cpu_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu")
-vol_bench_aer_simulator_cpu = VolBenchBackend(aer_simulator_cpu_directory)
-aer_simulator_gpu_directory = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu")
-vol_bench_aer_simulator_gpu = VolBenchBackend(aer_simulator_gpu_directory)
+# aer_simulator_cpu_directory_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_cpu")
+# vol_bench_aer_simulator_cpu = VolBenchBackend(aer_simulator_cpu_directory)
+# aer_simulator_gpu_directory_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu")
+# vol_bench_aer_simulator_gpu = VolBenchBackend(aer_simulator_gpu_directory)
 
-global_config, nqubits_depth_list = vol_bench_aer_simulator_cpu._backend_group_config_consistency_check()
-_, data_list = vol_bench_aer_simulator_cpu._get_backend_group_data(datafile_name="results.json", module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
+aer_simulator_cpu_directory_pc = Path("/home/juana/QUARK-2.1.7_fork/benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_cpu")
+aer_simulator_gpu_directory_pc = Path("/home/juana/QUARK-2.1.7_fork/benchmark_runs/generativemodeling_sweep_run_2026-08-05-17-13-30/volumetric_aer_simulator_gpu_vs_aer_simulator_cpu/aer_simulator_gpu")
 
-vol_bench_pair = VolBenchBackendPair(aer_simulator_cpu_directory, aer_simulator_gpu_directory)
+
+# global_config, nqubits_depth_list = vol_bench_aer_simulator_cpu._backend_group_config_consistency_check()
+# _, data_list = vol_bench_aer_simulator_cpu._get_backend_group_data(datafile_name="results.json", module_name="DiscreteData", parameter_name="generalization_metrics", nested_parameter="precision")
+
+vol_bench_pair = VolBenchBackendPair(aer_simulator_cpu_directory_pc, aer_simulator_gpu_directory_pc)
 bool = vol_bench_pair._check_consistency_across_backends()
-print("Consistency check across backends result:", bool)
+
+vol_bench_pair.backend_pair_single_parameter_vol_bench(datafile_name="results.json", module_name=None, parameter_name="total_time", nested_parameter=None)
 
 # aer_simulator_comparator = VolBenchBySimulatorCategory(test_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
 # aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
