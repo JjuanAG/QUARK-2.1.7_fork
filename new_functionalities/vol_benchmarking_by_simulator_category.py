@@ -299,101 +299,6 @@ class QgmRunResultsExtractor:
         
         ... # TODO: Implement logic to extract and return the desired data from the loaded .npy or .pkl file
 
-    # TODO: Note that if there are two or more runs that have the exact same number of qubits and circuit depth, the function will throw a warning 
-    def extract_run_data_for_config_group(self, simulator_path_name, print_results=False, print_constant_config=False):
-        # Setup the target path       
-        target_dir = self.base_path / simulator_path_name
-        
-        if not target_dir.exists():
-            print(f"Directory not found: {target_dir}")
-            return [], {}
-
-        all_run_results = []
-        global_constant_config = None
-        consistency_error = False
-
-        # Track (n_qubits, depth) to detect duplicates
-        seen_combinations = {}
-
-        # Iterate through all folders starting with 'generativemodeling'
-        for gen_folder in target_dir.iterdir():
-            if gen_folder.is_dir():
-            
-                # Locate required files based on image_e02a1d.png structure
-                config_file = next(gen_folder.glob("config.yml"), None)
-                results_file = next(gen_folder.glob("results.json"), None)
-                # Using rglob for nested files in benchmark_0/rep_1 subfolders
-                metrics_file = next(gen_folder.rglob("record_gen_metrics*.pkl"), None)
-                histogram_file = next(gen_folder.rglob("histogram_generated.npy"), None)
-
-                # --- Data extraction for each run ---
-                config_data = self.get_config_yml(str(config_file))
-                runtimes_data = self.get_runtimes_from_results_json(str(results_file))
-                precision_data = self.get_precision(str(metrics_file))
-                pmf_data = self.get_probability_distribution(str(histogram_file))
-                kl_best = self.get_KL_best(str(results_file))
-
-                if config_data is None:
-                    continue
-                else:
-                    # Flatten the config_data dictionary
-                    flat_config_data = {key: val for sub_dict in config_data.values() for key, val in sub_dict.items()}
-
-
-                # --- Duplicate run check ---
-                current_qubits = flat_config_data.get('n_qubits')
-                current_depth = flat_config_data.get('depth')
-                combination = (current_qubits, current_depth)
-
-                if combination in seen_combinations and not self.extract_run_data_for_config_group_was_called:
-                    print(f"WARNING: Two runs found with the exact same number of qubits ({current_qubits}) "
-                        f"and circuit depth ({current_depth}) in parent folder {target_dir.name}. First found in: {seen_combinations[combination]}, duplicate found in: {gen_folder.name}")
-                else:
-                    seen_combinations[combination] = gen_folder.name
-
-                # --- CONFIG CONSISTENCY CHECK ---
-                # Extract constants (everything EXCEPT n_qubits and depth)
-                current_constants = {k: v for k, v in flat_config_data.items() if k not in ['n_qubits', 'depth']}
-                
-                if global_constant_config is None:
-                    # First folder sets the baseline for constants
-                    global_constant_config = current_constants
-                else:
-                    # Compare current constants to the baseline
-                    if current_constants != global_constant_config:
-                        print(f"Warning: Mismatch of constant configuration parameters in folder {gen_folder.name}")
-                        consistency_error = True
-
-                # --- RESTRUCTURE RUN DATA ---
-                run_entry = {
-                    'n_qubits': current_qubits,
-                    'circuit_depth': current_depth,
-                    'precision': precision_data,
-                    'pmf': pmf_data,
-                    'runtimes': runtimes_data,
-                    'KL_best': kl_best
-                }
-                all_run_results.append(run_entry)
-
-        if consistency_error:
-            print("Note: Some benchmark runs had differing constant parameters. Check logs above.")
-            return None
-
-        # Printing results for verification
-        if print_results:
-            for idx, run in enumerate(all_run_results):
-                print(f"Benchmark run {idx+1}: {all_run_results[idx]}")
-        
-        if print_constant_config:
-            print(f"Data from benchmark runs in directory: {target_dir} extracted successfully.")
-            print(f"Number of runs processed: {len(all_run_results)} with constant configuration parameters:" )
-            print("Global Constant Config:", global_constant_config)
-            print()
-
-        self.extract_run_data_for_config_group_was_called = True  # Set the flag to True after the first call to prevent duplicate warnings in subsequent calls
-       
-        return all_run_results, global_constant_config
-
 class VolBenchBackend:
     def __init__(self, backend_path: str):
         self.backend_path = backend_path
@@ -464,192 +369,6 @@ class VolBenchBackend:
                         data_name: data
                     })
         return global_constant_config, data_list
-
-    def check_for_compatible_config_groups_across_simulators(self):
-        notnoisy_data_list, notnoisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path, print_results=False, print_constant_config=True)
-        noisy_data_list, noisy_constants = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path, print_results=False, print_constant_config=True)
-        # noisy_constants.pop('backend')
-        # notnoisy_constants.pop('backend')
-        # Extract the number of qubits and circuit depth for each run in both lists
-        n_qubits_list_notnoisy = [notnoisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(notnoisy_data_list)]
-        circuit_depth_list_notnoisy = [notnoisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(notnoisy_data_list)]
-        n_qubits_list_noisy = [noisy_data_list[idx]['n_qubits'] for idx, _ in enumerate(noisy_data_list)]
-        circuit_depth_list_noisy = [noisy_data_list[idx]['circuit_depth'] for idx, _ in enumerate(noisy_data_list)]
-
-        if len(notnoisy_data_list) != len(noisy_data_list):
-            print("Error: The number of runs with the not-noisy and noisy simulators must be equal.")
-            return
-
-        elif notnoisy_constants != noisy_constants:
-            print("Error: The constant configuration parameters do not match between the not-noisy and noisy simulators.")
-            print("Not-noisy constants:", notnoisy_constants)
-            print("Noisy constants:", noisy_constants)
-            return False
-        elif set(n_qubits_list_notnoisy) != set(n_qubits_list_noisy) or set(circuit_depth_list_notnoisy) != set(circuit_depth_list_noisy):
-            print("Error: The variable configuration parameters (n_qubits and circuit_depth) do not match between the not-noisy and noisy simulators.")
-            print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
-            print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
-            print("Noisy n_qubits:", n_qubits_list_noisy)
-            print("Noisy circuit_depth:", circuit_depth_list_noisy)
-            return False
-
-        print("Success: The variable configuration parameters match between the not-noisy and noisy simulators.")
-        print("Not-noisy n_qubits:", n_qubits_list_notnoisy)
-        print("Not-noisy circuit_depth:", circuit_depth_list_notnoisy)
-        print("Noisy n_qubits:", n_qubits_list_noisy)
-        print("Noisy circuit_depth:", circuit_depth_list_noisy)
-        return True
-
-
-    def noisy_notnoisy_precision_comparison(self): 
-        # Run compatibility check
-        self.check_for_compatible_config_groups_across_simulators()
-
-        # Extract data (Unpacking the tuple: data_list, constant_config)
-        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
-        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
-
-        # Helper function to extract and sort axes data
-        def prepare_plot_vectors(data_list):
-            # Sorting ensures the "curve" connects points in a logical order
-            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
-
-            if not sorted_data:
-                print("Warning: No data available to plot.")
-                return [], [], []
-
-            x = [d['n_qubits'] for d in sorted_data]
-            y = [d['circuit_depth'] for d in sorted_data]
-            z = [d['precision'] for d in sorted_data]
-            return x, y, z
-
-        # Prepare vectors for both simulators
-        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, precision for noise-free simulator
-        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, precision for noisy simulator
-
-        # Calculate precision difference between the two simulators for each corresponding run (they are in the same order after sorting)
-        precision_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
-        precision_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, precision_diff)}
-
-        # Restructure dictionary into a sorted matrix DataFrame
-        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in precision_diff_per_nqubit_depth.items()]
-        df = pd.DataFrame(df_data)
-        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
-        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
-
-
-        # ==========================================
-        # Plotting both the 3D curve and the matrix heatmap side by side
-        # ==========================================
-        fig = plt.figure(figsize=(20, 8))
-
-        # Subplot 1: The Original 3D Plot
-        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
-
-        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
-        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
-
-        ax1.set_xlabel("n_qubits (X)")
-        ax1.set_ylabel("circuit_depth (Y)")
-        ax1.set_zlabel("Precision (Z)")
-        ax1.set_title("Precision Comparison: Noise-Free vs Noisy")
-        ax1.legend()
-
-
-        # Subplot 2: Matrix Heatmap
-        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
-
-        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
-        ax2.set_title("Precision Difference Matrix")
-        ax2.set_xlabel("Number of Qubits (Columns)")
-        ax2.set_ylabel("Circuit Depth (Rows)")
-
-        plt.show()
-
-
-    def noisy_notnoisy_single_module_runtime_comparison(self, module_name=None): 
-        # Run compatibility check
-        self.check_for_compatible_config_groups_across_simulators()
-
-        # Extract data (Unpacking the tuple: data_list, constant_config)
-        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
-        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
-
-        # Check if module name is provided and exists in the runtimes data
-        if module_name is None:
-            print("Error: A module name to extract the runtimes for must be provided as an argument to the function.")
-            return None 
-        elif module_name not in notnoisy_data_list[0]['runtimes']:  # Note: check_for_compatible_config_groups_across_simulators() should ensure that the module is present in both simulators, so we can just check one of them
-            print(f"Error: Module '{module_name}' not found")
-            print("Available modules are:")
-            print(list(notnoisy_data_list[0]['runtimes'].keys()))
-            return None
-
-        # Helper function to extract and sort axes data
-        def prepare_plot_vectors(data_list):
-            # Sorting ensures the "curve" connects points in a logical order
-            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
-
-            if not sorted_data:
-                print("Warning: No data available to plot.")
-                return [], [], []
-
-            x = [d['n_qubits'] for d in sorted_data]
-            y = [d['circuit_depth'] for d in sorted_data]
-            z = [d['runtimes'][module_name]['total_time'].time for d in sorted_data]
-
-            # extract units and check for consistency
-            units = [d['runtimes'][module_name]['total_time'].unit for d in sorted_data]
-            if len(set(units)) > 1:
-                print(f"Error: Inconsistent time units found in the runtimes for module '{module_name}'. Units found: {set(units)}")
-                return None, None, None
-            return x, y, z, units[0]  # return the common unit as well
-
-        # Prepare vectors for both simulators
-        x_free, y_free, z_free, unit_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, runtime for a chosen noise-free simulator module
-        x_noisy, y_noisy, z_noisy, unit_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, runtime for a chosen noisy simulator module
-
-        if unit_free != unit_noisy:
-            print(f"Error: Time units for the runtimes of module '{module_name}' do not match between the not-noisy and noisy simulators. Not-noisy unit: {unit_free}, Noisy unit: {unit_noisy}")
-            return None
-
-        # Calculate runtime difference between the two simulators for each corresponding run (they are in the same order after sorting)
-        runtime_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
-        runtime_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, runtime_diff)}
-
-        # Restructure dictionary into a sorted matrix DataFrame
-        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in runtime_diff_per_nqubit_depth.items()]
-        df = pd.DataFrame(df_data)
-        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
-        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
-
-        # ==========================================
-        # Plotting both the 3D curve and the matrix heatmap side by side
-        # ==========================================
-        fig = plt.figure(figsize=(20, 8))
-
-        # Subplot 1: The Original 3D Plot
-        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
-
-        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
-        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
-
-        ax1.set_xlabel("n_qubits")
-        ax1.set_ylabel("circuit_depth")
-        ax1.set_zlabel(f"Runtime ({unit_free})")
-        ax1.set_title(f"{module_name} total runtime Comparison: Noise-Free vs Noisy")
-        ax1.legend()
-
-
-        # Subplot 2: Matrix Heatmap
-        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
-
-        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
-        ax2.set_title(f"{module_name} total runtime Difference Matrix in {unit_free} (Noise-Free - Noisy)")
-        ax2.set_xlabel("Number of Qubits (Columns)")
-        ax2.set_ylabel("Circuit Depth (Rows)")
-
-        plt.show()
 
     def noisy_notnoisy_modular_runtime_comparison(self):
         # Run compatibility check
@@ -795,72 +514,6 @@ class VolBenchBackend:
         # Layout fix for the heatmap figure and then reveal it
         fig_heatmap.tight_layout()
         plt.show()  # Displays the Heatmap grid figure window
-    
-    def noisy_notnoisy_KL_divergence_comparison(self):
-        # Run compatibility check
-        self.check_for_compatible_config_groups_across_simulators()
-
-        # Extract data (Unpacking the tuple: data_list, constant_config)
-        notnoisy_data_list, notnoisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.notnoisy_simulator_path)
-        noisy_data_list, noisy_constant_config = self.qgm_data_object.extract_run_data_for_config_group(self.noisy_simulator_path)
-
-        # Helper function to extract and sort axes data
-        def prepare_plot_vectors(data_list):
-            # Sorting ensures the "curve" connects points in a logical order
-            sorted_data = sorted(data_list, key=lambda x: (x['n_qubits'], x['circuit_depth']))
-
-            if not sorted_data:
-                print("Warning: No data available to plot.")
-                return [], [], []
-
-            x = [d['n_qubits'] for d in sorted_data]
-            y = [d['circuit_depth'] for d in sorted_data]
-            z = [d['KL_best'] for d in sorted_data]
-            return x, y, z
-
-        # Prepare vectors for both simulators
-        x_free, y_free, z_free = prepare_plot_vectors(notnoisy_data_list)  # n_qubits, circuit_depth, KL_divergence for noise-free simulator
-        x_noisy, y_noisy, z_noisy = prepare_plot_vectors(noisy_data_list)  # n_qubits, circuit_depth, KL_divergence for noisy simulator
-
-        # Calculate KL divergence difference between the two simulators for each corresponding run (they are in the same order after sorting)
-        kl_diff = [zf - zn for zf, zn in zip(z_free, z_noisy)]
-        kl_diff_per_nqubit_depth = {(x, y): diff for x, y, diff in zip(x_free, y_free, kl_diff)}
-
-        # Restructure dictionary into a sorted matrix DataFrame
-        df_data = [{"n_qubits": q, "circuit_depth": d, "diff": diff} for (q, d), diff in kl_diff_per_nqubit_depth.items()]
-        df = pd.DataFrame(df_data)
-        matrix_df = df.pivot(index="circuit_depth", columns="n_qubits", values="diff")  # turn into 2D matrix with circuit_depth as rows and n_qubits as columns
-        matrix_df = matrix_df.sort_index(axis=0, ascending=True).sort_index(axis=1, ascending=True)  # .sort_index(axis=0, ascending=True) sorts the rows (axis 0) numerically from lowest depth to highest depth and .sort_index(axis=1, ascending=True) sorts the columns (axis 1) numerically from lowest qubit count to highest qubit count.
-
-
-        # ==========================================
-        # Plotting both the 3D curve and the matrix heatmap side by side
-        # ==========================================
-        fig = plt.figure(figsize=(20, 8))
-
-        # Subplot 1: The Original 3D Plot
-        ax1 = fig.add_subplot(121, projection="3d")  # 1 row, 2 cols, position 1
-
-        ax1.plot(x_free, y_free, z_free, label=notnoisy_constant_config.get("backend"), marker="o", linewidth=2, color="blue")
-        ax1.plot(x_noisy, y_noisy, z_noisy, label=noisy_constant_config.get("backend"), marker="x", linestyle="--", linewidth=2, color="blue")
-
-        ax1.set_xlabel("n_qubits (X)")
-        ax1.set_ylabel("circuit_depth (Y)")
-        ax1.set_zlabel("KL Divergence (Z)")
-        ax1.set_title("KL Divergence Comparison: Noise-Free vs Noisy")
-        ax1.legend()
-
-
-        # Subplot 2: Matrix Heatmap
-        ax2 = fig.add_subplot(122)  # 1 row, 2 cols, position 2
-
-        sns.heatmap(matrix_df,  annot=True, fmt=".4f", cmap="coolwarm", center=0, ax=ax2)  #  coolwarm
-        ax2.set_title("KL Divergence Difference Matrix")
-        ax2.set_xlabel("Number of Qubits (Columns)")
-        ax2.set_ylabel("Circuit Depth (Rows)")
-
-        plt.show()
-
 
 class VolBenchBackendPair():
     def __init__(self, backend_path_1: str, backend_path_2: str):
@@ -871,10 +524,24 @@ class VolBenchBackendPair():
     def _check_consistency_across_backends(self):
         global_config_1, nqubits_depth_list_1 = self.vol_backend_1._backend_group_config_consistency_check()
         global_config_2, nqubits_depth_list_2 = self.vol_backend_2._backend_group_config_consistency_check()
-        
-        ignored_key = "backend"  # TODO: This might not necessarily be only "backend"
-        global_config_1_filtered = {k: v for k, v in global_config_1.items() if k != ignored_key}
-        global_config_2_filtered = {k: v for k, v in global_config_2.items() if k != ignored_key}
+
+        # Only either the noise_configuration or the backend should differ across global configurations
+        if "noise_configuration" in global_config_1.keys() and "noise_configuration" in global_config_2.keys():
+            if global_config_1["noise_configuration"] != global_config_2["noise_configuration"] and global_config_1["backend"] == global_config_2["backend"]:
+                noise_config_or_backend = "noise_configuration"  # TODO: This might not necessarily be only "noise_configuration"
+            elif global_config_1["backend"] != global_config_2["backend"] and global_config_1["noise_configuration"] == global_config_2["noise_configuration"]:
+                noise_config_or_backend = "backend"  # TODO: This might not necessarily be only "backend"
+            elif global_config_1["backend"] != global_config_2["backend"] and global_config_1["noise_configuration"] != global_config_2["noise_configuration"]:
+                raise ValueError(
+                    "Only either the backend or noise configuration can differ between backends, not both.\n"
+                    f"Backend 1 constants: {global_config_1}\n"
+                    f"Backend 2 constants: {global_config_2}"
+                )
+        else:
+            noise_config_or_backend = "backend" 
+
+        global_config_1_filtered = {k: v for k, v in global_config_1.items() if k != noise_config_or_backend}
+        global_config_2_filtered = {k: v for k, v in global_config_2.items() if k != noise_config_or_backend}
 
         if global_config_1_filtered != global_config_2_filtered:
             raise ValueError(
@@ -889,24 +556,29 @@ class VolBenchBackendPair():
                 f"Backend 2 ({len(nqubits_depth_list_2)} runs): {nqubits_depth_list_2}"
             )
         
-        return True
+        return noise_config_or_backend
     
     def _backend_pair_data_extraction(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
         # Check for consistency across backends
-        self._check_consistency_across_backends()
+        noise_config_or_backend = self._check_consistency_across_backends()
 
         # Extract data from both backends
         global_config_1, data_list_1 = self.vol_backend_1._get_backend_group_data(datafile_name, module_name, parameter_name, nested_parameter)
         global_config_2, data_list_2 = self.vol_backend_2._get_backend_group_data(datafile_name, module_name, parameter_name, nested_parameter)
 
-        return (global_config_1, data_list_1), (global_config_2, data_list_2)
+        return (global_config_1, data_list_1), (global_config_2, data_list_2), noise_config_or_backend
     
     def backend_pair_single_parameter_vol_bench(self, datafile_name: str, module_name: str | None = None, parameter_name: str | None = None, nested_parameter: str | None = None):
         # Extract data from both backends
-        (global_config_1, data_list_1), (global_config_2, data_list_2) = self._backend_pair_data_extraction(datafile_name, module_name, parameter_name, nested_parameter)
+        (global_config_1, data_list_1), (global_config_2, data_list_2), noise_config_or_backend = self._backend_pair_data_extraction(datafile_name, module_name, parameter_name, nested_parameter)
 
-        backend_name_1 = global_config_1.get("backend", "Backend 1")
-        backend_name_2 = global_config_2.get("backend", "Backend 2")
+        if noise_config_or_backend == "noise_configuration":
+            backend_name_1 = global_config_1.get("noise_configuration", "Noise Config 1")
+            backend_name_2 = global_config_2.get("noise_configuration", "Noise Config 2")
+        else:
+            backend_name_1 = global_config_1.get("backend", "Backend 1")
+            backend_name_2 = global_config_2.get("backend", "Backend 2")
+
         if nested_parameter is None:
             data_name = parameter_name
         else:
@@ -965,36 +637,11 @@ class VolBenchBackendPair():
         ax2.set_ylabel("Circuit Depth (Rows)")
 
         plt.show()
+
+    def backend_par_multi_modular_runtime_vol_bench(self):
+        # TODO implement this function
+        pass
     
-
-
-# --- Example Usage Data Extractor ---
-base_path_pc = Path(r"\\wsl.localhost\Ubuntu\home\juana\QUARK-2.1.7_fork\benchmark_runs\sorted")
-base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\sorted")
-base_path_gpu_cluster = Path(r"/home/garciabetancour/QUARK-2.1.7_fork/benchmark_runs/sorted")
-qgm_data_extractor = QgmRunResultsExtractor(base_path_gpu_cluster)
-
-# Example of run parameters
-# print("Start of examples:")
-# run_data_example = qgm_data_extractor.extract_run_data_for_config_group(r"constant_config_1\fake_sherbrooke_simulator", print_results=True, print_constant_config=True)
-# print(run_data_example)
-# print()
-# print("End of examples.")
-# print("--------------------------------------------------")
-# print()
-
-
-# --- Volumetric Benchmarking Comparison ---
-# aer_statevector_simulator_gpu_path = r"constant_config_1/aer_statevector_simulator_gpu"
-# aer_statevector_simulator_gpu_path = (Path("constant_config_1") / "aer_statevector_simulator_gpu")
-# fake_sherbrooke_simulator_path = r"constant_config_1/fake_sherbrooke_simulator"
-# fake_sherbrooke_simulator_path = (Path("constant_config_1") / "fake_sherbrooke_simulator")
-# aer_statevector_fake_sherbrooke_comparator = VolBenchBySimulatorCategory(qgm_data_extractor, aer_statevector_simulator_gpu_path, fake_sherbrooke_simulator_path)
-
-# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_precision_comparison()
-# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_single_module_runtime_comparison('LibraryQiskit')
-# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_modular_runtime_comparison()
-# aer_statevector_fake_sherbrooke_comparator.noisy_notnoisy_KL_divergence_comparison()
 
 # --- HPC Volumetric comparison ---
 # base_path_itwm = Path(r"\\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu")
@@ -1022,9 +669,7 @@ aer_simulator_gpu_directory_pc = Path("/home/juana/QUARK-2.1.7_fork/benchmark_ru
 vol_bench_pair = VolBenchBackendPair(aer_simulator_cpu_directory_pc, aer_simulator_gpu_directory_pc)
 bool = vol_bench_pair._check_consistency_across_backends()
 
-vol_bench_pair.backend_pair_single_parameter_vol_bench(datafile_name="results.json", module_name=None, parameter_name="total_time", nested_parameter=None)
+vol_bench_pair.backend_pair_single_parameter_vol_bench(datafile_name="results.json", module_name="DiscreteData", parameter_name="total_time", nested_parameter=None)
 
 # aer_simulator_comparator = VolBenchBySimulatorCategory(test_data_extractor, aer_simulator_gpu_path, aer_simulator_cpu_path)
 # aer_simulator_comparator.noisy_notnoisy_modular_runtime_comparison()
-
-# \\itwm\u\g\garciabetancour\QUARK-2.1.7_fork\benchmark_runs\generativemodeling_sweep_run_2026-08-05-17-13-30\volumetric_aer_simulator_gpu_vs_aer_simulator_cpu\aer_simulator_gpu
