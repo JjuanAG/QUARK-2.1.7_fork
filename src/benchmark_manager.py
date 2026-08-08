@@ -272,13 +272,19 @@ class BenchmarkManager:
             config_manager = individual_config_manager_objects[idx]
 
             sweep_group_name = sweep_combination_per_group[0]
-            
+            backend_name = sweep_combination_per_group[1]["backend"] if "backend" in sweep_combination_per_group[1] else None
+            noise_configuration_name = sweep_combination_per_group[1]["noise_configuration"] if "noise_configuration" in sweep_combination_per_group[1] else None
+
+            if backend_name is None and noise_configuration_name is not None:
+                backend_name = noise_configuration_name
+            # TODO: test out this new implementation
+
             # Create the directory structure for the sweep run, including the sweep group name and backend name if applicable.
             self._create_store_dir_sweep(
                 store_dir, 
                 tag_application_name=config_manager.get_config()["application"]["name"].lower().replace("-", ""), 
                 tag_sweep_group_name=sweep_group_name, 
-                tag_backend_name=sweep_combination_per_group[1]["backend"] if "backend" in sweep_combination_per_group[1] else None, 
+                tag_backend_name=backend_name, 
                 backend_grouping=True,
                 global_start_timestamp=global_start_timestamp  # <-- Pass the master timestamp
             )
